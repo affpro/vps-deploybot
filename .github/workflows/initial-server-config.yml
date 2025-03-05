@@ -32,3 +32,72 @@ jobs:
               echo "✅ Docker is already installed: $(docker --version)"
             fi
           EOF
+
+      - name: Check & Install PostgreSQL in Docker (Secure)
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            bash -s -- \
+            "${{ secrets.POSTGRES_TAXI_LAGUNA_DB_NAME }}" \
+            "${{ secrets.POSTGRES_TAXI_LAGUNA_DB_USER }}" \
+            "${{ secrets.POSTGRES_TAXI_LAGUNA_DB_PASS }}" \
+            "${{ secrets.POSTGRES_ALIX_DB_NAME }}" \
+            "${{ secrets.POSTGRES_ALIX_DB_USER }}" \
+            "${{ secrets.POSTGRES_ALIX_DB_PASS }}" \
+            "${{ secrets.POSTGRES_ADMIN_USER }}" \
+            "${{ secrets.POSTGRES_ADMIN_PASS }}" << 'EOF'
+            
+            POSTGRES_TAXI_LAGUNA_DB_NAME=$1
+            POSTGRES_TAXI_LAGUNA_DB_USER=$2
+            POSTGRES_TAXI_LAGUNA_DB_PASS=$3
+            POSTGRES_ALIX_DB_NAME=$4
+            POSTGRES_ALIX_DB_USER=$5
+            POSTGRES_ALIX_DB_PASS=$6
+            POSTGRES_ADMIN_USER=$7
+            POSTGRES_ADMIN_PASS=$8
+
+            echo "🔎 Checking PostgreSQL in Docker..."
+
+            if ! docker ps --format '{{.Names}}' | grep -q postgres_container; then
+              echo "❌ PostgreSQL is not running. Installing..."
+  
+              # Pull PostgreSQL image
+              docker pull postgres:latest
+
+              # Create an init script dynamically
+              cat <<INIT_SCRIPT > init-db.sh
+              #!/bin/bash
+              set -e
+              psql -v ON_ERROR_STOP=1 --username "\$POSTGRES_USER" <<-EOSQL
+                CREATE DATABASE $POSTGRES_TAXI_LAGUNA_DB_NAME;
+                CREATE USER $POSTGRES_TAXI_LAGUNA_DB_USER WITH ENCRYPTED PASSWORD '$POSTGRES_TAXI_LAGUNA_DB_PASS';
+                GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_TAXI_LAGUNA_DB_NAME TO $POSTGRES_TAXI_LAGUNA_DB_USER;
+
+                CREATE DATABASE $POSTGRES_ALIX_DB_NAME;
+                CREATE USER $POSTGRES_ALIX_DB_USER WITH ENCRYPTED PASSWORD '$POSTGRES_ALIX_DB_PASS';
+                GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_ALIX_DB_NAME TO $POSTGRES_ALIX_DB_USER;
+              EOSQL
+              INIT_SCRIPT
+
+              chmod +x init-db.sh
+
+              # Run PostgreSQL with secrets
+              docker run -d \
+                --name postgres_container \
+                -e POSTGRES_USER=$POSTGRES_ADMIN_USER \
+                -e POSTGRES_PASSWORD=$POSTGRES_ADMIN_PASS \
+                -e POSTGRES_DB=defaultdb \
+                -p 5432:5432 \
+                -v postgres_data:/var/lib/postgresql/data \
+                -v $(pwd)/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh \
+                --restart always \
+                postgres:latest
+
+              echo "✅ PostgreSQL installed and running with multiple databases!"
+            else
+              echo "✅ PostgreSQL is already running!"
+            fi
+
+            # Open port 5432
+            sudo ufw allow 5432/tcp
+            echo "✅ Port 5432 is open for PostgreSQL!"
+          EOF
