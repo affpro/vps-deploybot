@@ -123,5 +123,8 @@ jobs:
             for ip in "\${ip_array[@]}"; do
               sudo ufw allow from \$ip to any port 5432 proto tcp
             done
+
+            # Reload UFW to apply changes
+            sudo ufw reload
             echo "✅ Firewall updated to allow PostgreSQL access from only the allowed IPs!"
           EOF
