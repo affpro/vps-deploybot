@@ -1,0 +1,27 @@
+name: Init VPS configuration
+
+on:
+  workflow_dispatch:  # Allows manual trigger from GitHub Actions
+
+jobs:
+  check-install-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Connect to VPS & Check Docker
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            echo "✅ Connected to VPS: $(hostname)"
+
+            if ! command -v docker &> /dev/null; then
+              echo "❌ Docker is not installed. Installing now..."
+              
+              sudo apt update
+              sudo apt install -y docker.io
+              sudo systemctl enable --now docker
+              
+              echo "✅ Docker installed: $(docker --version)"
+            else
+              echo "✅ Docker is already installed: $(docker --version)"
+            fi
+          EOF
