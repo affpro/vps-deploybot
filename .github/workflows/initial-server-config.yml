@@ -63,20 +63,15 @@ jobs:
               # Pull PostgreSQL image
               docker pull postgres:latest
 
-              # Create an init script properly
-              cat > init-db.sh <<EOL
-              #!/bin/bash
-              set -e
-              psql -v ON_ERROR_STOP=1 --username "\$POSTGRES_USER" <<EOSQL
-                CREATE DATABASE $POSTGRES_TAXI_LAGUNA_DB_NAME;
-                CREATE USER $POSTGRES_TAXI_LAGUNA_DB_USER WITH ENCRYPTED PASSWORD '$POSTGRES_TAXI_LAGUNA_DB_PASS';
-                GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_TAXI_LAGUNA_DB_NAME TO $POSTGRES_TAXI_LAGUNA_DB_USER;
-
-                CREATE DATABASE $POSTGRES_ALIX_DB_NAME;
-                CREATE USER $POSTGRES_ALIX_DB_USER WITH ENCRYPTED PASSWORD '$POSTGRES_ALIX_DB_PASS';
-                GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_ALIX_DB_NAME TO $POSTGRES_ALIX_DB_USER;
-              EOSQL
-              EOL
+              # Create an init script correctly
+              printf '#!/bin/bash\nset -e\npsql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<EOSQL\n' > init-db.sh
+              printf 'CREATE DATABASE %s;\n' "$POSTGRES_TAXI_LAGUNA_DB_NAME" >> init-db.sh
+              printf 'CREATE USER %s WITH ENCRYPTED PASSWORD '"'"'%s'"'"';\n' "$POSTGRES_TAXI_LAGUNA_DB_USER" "$POSTGRES_TAXI_LAGUNA_DB_PASS" >> init-db.sh
+              printf 'GRANT ALL PRIVILEGES ON DATABASE %s TO %s;\n' "$POSTGRES_TAXI_LAGUNA_DB_NAME" "$POSTGRES_TAXI_LAGUNA_DB_USER" >> init-db.sh
+              printf 'CREATE DATABASE %s;\n' "$POSTGRES_ALIX_DB_NAME" >> init-db.sh
+              printf 'CREATE USER %s WITH ENCRYPTED PASSWORD '"'"'%s'"'"';\n' "$POSTGRES_ALIX_DB_USER" "$POSTGRES_ALIX_DB_PASS" >> init-db.sh
+              printf 'GRANT ALL PRIVILEGES ON DATABASE %s TO %s;\n' "$POSTGRES_ALIX_DB_NAME" "$POSTGRES_ALIX_DB_USER" >> init-db.sh
+              printf 'EOSQL\n' >> init-db.sh
 
               chmod +x init-db.sh
 
