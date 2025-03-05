@@ -63,11 +63,11 @@ jobs:
               # Pull PostgreSQL image
               docker pull postgres:latest
 
-              # Create an init script dynamically
-              cat <<INIT_SCRIPT > init-db.sh
+              # Create an init script properly
+              cat > init-db.sh <<EOL
               #!/bin/bash
               set -e
-              psql -v ON_ERROR_STOP=1 --username "\$POSTGRES_USER" <<-EOSQL
+              psql -v ON_ERROR_STOP=1 --username "\$POSTGRES_USER" <<EOSQL
                 CREATE DATABASE $POSTGRES_TAXI_LAGUNA_DB_NAME;
                 CREATE USER $POSTGRES_TAXI_LAGUNA_DB_USER WITH ENCRYPTED PASSWORD '$POSTGRES_TAXI_LAGUNA_DB_PASS';
                 GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_TAXI_LAGUNA_DB_NAME TO $POSTGRES_TAXI_LAGUNA_DB_USER;
@@ -76,7 +76,7 @@ jobs:
                 CREATE USER $POSTGRES_ALIX_DB_USER WITH ENCRYPTED PASSWORD '$POSTGRES_ALIX_DB_PASS';
                 GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_ALIX_DB_NAME TO $POSTGRES_ALIX_DB_USER;
               EOSQL
-              INIT_SCRIPT
+              EOL
 
               chmod +x init-db.sh
 
