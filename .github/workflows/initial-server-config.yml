@@ -96,3 +96,32 @@ jobs:
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
           EOF
+
+      - name: Configure PostgreSQL for Limited Remote Access 🌍
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            bash -s -- "${{ secrets.ALLOWED_IPS }}" << 'EOF'
+            
+            ALLOWED_IPS=$1
+
+            echo "🔎 Checking PostgreSQL remote access settings..."
+
+            # Enable remote connections in postgresql.conf
+            docker exec postgres_container bash -c "grep -q '^listen_addresses' /var/lib/postgresql/data/postgresql.conf || echo \"listen_addresses = '*'\" >> /var/lib/postgresql/data/postgresql.conf"
+
+            # Loop through the ALLOWED_IPS variable and add entries to pg_hba.conf
+            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
+            for ip in "\${ip_array[@]}"; do
+              docker exec postgres_container bash -c "grep -q '^host all all \$ip/32' /var/lib/postgresql/data/pg_hba.conf || echo \"host all all \$ip/32 md5\" >> /var/lib/postgresql/data/pg_hba.conf"
+            done
+
+            # Restart PostgreSQL to apply changes
+            docker restart postgres_container
+            echo "✅ PostgreSQL is now accessible only from the specified IPs!"
+
+            # Ensure firewall allows connections only from these IPs
+            for ip in "\${ip_array[@]}"; do
+              sudo ufw allow from \$ip to any port 5432 proto tcp
+            done
+            echo "✅ Firewall updated to allow PostgreSQL access from only the allowed IPs!"
+          EOF
