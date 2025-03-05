@@ -117,6 +117,9 @@ jobs:
 
             # Restart PostgreSQL to apply changes
             docker restart postgres_container
+
+            # Check for any errors in container logs
+            docker logs postgres_container || true
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
 
             # Ensure firewall allows connections only from these IPs
