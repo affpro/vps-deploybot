@@ -93,6 +93,13 @@ jobs:
 
             echo "🔎 Checking PostgreSQL remote access settings..."
 
+            echo "Listing allowed IPs from secrets..."
+            echo "🔍 Processing ALLOWED_IPS: $ALLOWED_IPS"
+            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
+            for ip in "${ip_array[@]}"; do
+              echo "➡ Adding IP: $ip to pg_hba.conf"
+            done
+
             # Ensure pg_hba.conf exists and has correct permissions
             docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
 
