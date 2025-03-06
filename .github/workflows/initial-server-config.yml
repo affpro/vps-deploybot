@@ -138,5 +138,8 @@ jobs:
             sleep 30
             docker logs postgres_container --tail 50
 
+            echo "🔎 Allowed IPs from pg_hba.conf:"
+            docker exec postgres_container grep "^host" /var/lib/postgresql/data/pg_hba.conf
+
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
           EOF
