@@ -19,14 +19,11 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             echo "✅ Connected to VPS: $(hostname)"
-
             if ! command -v docker &> /dev/null; then
               echo "❌ Docker is not installed. Installing now..."
-              
               sudo apt update
               sudo apt install -y docker.io
               sudo systemctl enable --now docker
-              
               echo "✅ Docker installed: $(docker --version)"
             else
               echo "✅ Docker is already installed: $(docker --version)"
@@ -39,19 +36,15 @@ jobs:
             bash -s -- \
             "${{ secrets.POSTGRES_ADMIN_USER }}" \
             "${{ secrets.POSTGRES_ADMIN_PASS }}" << 'EOF'
-      
+
             POSTGRES_ADMIN_USER=$1
             POSTGRES_ADMIN_PASS=$2
-      
+
             echo "🔎 Checking PostgreSQL in Docker..."
-      
+
             if ! docker ps --format '{{.Names}}' | grep -q postgres_container; then
               echo "❌ PostgreSQL is not running. Installing..."
-      
-              # Pull PostgreSQL image
               docker pull postgres:latest
-      
-              # Run PostgreSQL with admin user only
               docker run -d \
                 --name postgres_container \
                 -e POSTGRES_USER=$POSTGRES_ADMIN_USER \
@@ -61,13 +54,11 @@ jobs:
                 -v postgres_data:/var/lib/postgresql/data \
                 --restart always \
                 postgres:latest
-      
               echo "✅ PostgreSQL installed and running with admin user only!"
             else
               echo "✅ PostgreSQL is already running!"
             fi
-      
-            # Open port 5432
+
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
           EOF
@@ -76,25 +67,21 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             bash -s -- "${{ secrets.POSTGRES_ADMIN_USER }}" << 'EOF'
-      
+
             POSTGRES_ADMIN_USER=$1
-      
             echo "⏳ Checking PostgreSQL connection..."
             MAX_RETRIES=10
             RETRY_INTERVAL=2
             COUNT=0
-      
             until docker exec postgres_container pg_isready -U "$POSTGRES_ADMIN_USER" || [ $COUNT -eq $MAX_RETRIES ]; do
               echo "🔄 Waiting for PostgreSQL to be ready... ($COUNT/$MAX_RETRIES)"
               sleep $RETRY_INTERVAL
               COUNT=$((COUNT+1))
             done
-      
             if [ $COUNT -eq $MAX_RETRIES ]; then
               echo "❌ PostgreSQL did not become ready in time. Exiting..."
               exit 1
             fi
-      
             echo "✅ PostgreSQL is ready and accepting connections!"
           EOF
 
@@ -102,44 +89,23 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             bash -s -- "${{ secrets.ALLOWED_IPS }}" << 'EOF'
-            
             ALLOWED_IPS=$1
-
             echo "🔎 Checking PostgreSQL remote access settings..."
-
-            # Enable remote connections in postgresql.conf
-            docker exec postgres_container bash -c "grep -q '^listen_addresses' /var/lib/postgresql/data/postgresql.conf || echo \"listen_addresses = '*'\" >> /var/lib/postgresql/data/postgresql.conf"
-
-            # Enable remote connections in postgresql.conf
             docker exec postgres_container bash -c "sed -i '/^#listen_addresses =/c\listen_addresses = '\''*'\'' ' /var/lib/postgresql/data/postgresql.conf"
-
-            # Ensure pg_hba.conf exists before modifying
             docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
-
-            # Loop through allowed IPs and add entries
-            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
+            IFS=',' read -r -a ip_array <<< "${{ secrets.ALLOWED_IPS }}"
             for ip in "${ip_array[@]}"; do
               if [[ $ip =~ / ]]; then
-                # CIDR format
                 docker exec postgres_container bash -c "grep -q '^host all all $ip' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip md5' | tee -a /var/lib/postgresql/data/pg_hba.conf"
               else
-                # Single IP, use /32
                 docker exec postgres_container bash -c "grep -q '^host all all $ip/32' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip/32 md5' | tee -a /var/lib/postgresql/data/pg_hba.conf"
               fi
             done
-
-            # Ensure correct permissions for PostgreSQL to read the config
             docker exec postgres_container bash -c "chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
-
-            # Restart PostgreSQL to apply changes
             docker restart postgres_container
-
-            # Verify PostgreSQL is running
             sleep 30
             docker logs postgres_container --tail 50
-
             echo "🔎 Allowed IPs from pg_hba.conf:"
             docker exec postgres_container grep "^host" /var/lib/postgresql/data/pg_hba.conf
-
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
           EOF
