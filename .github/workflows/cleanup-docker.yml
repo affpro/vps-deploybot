@@ -1,0 +1,33 @@
+name: Cleanup Docker on VPS
+
+on:
+  workflow_dispatch:  # Allows manual trigger from GitHub Actions
+
+jobs:
+  cleanup-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Cleanup Docker on VPS
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            echo "🛑 Stopping all Docker containers..."
+            docker stop $(docker ps -aq) 2>/dev/null || echo "No running containers."
+
+            echo "🗑 Removing all Docker containers..."
+            docker rm $(docker ps -aq) 2>/dev/null || echo "No containers to remove."
+
+            echo "📦 Removing all Docker images..."
+            docker rmi $(docker images -q) -f 2>/dev/null || echo "No images to remove."
+
+            echo "📂 Removing all Docker volumes..."
+            docker volume rm $(docker volume ls -q) -f 2>/dev/null || echo "No volumes to remove."
+
+            echo "🧹 Removing unused Docker networks..."
+            docker network prune -f 2>/dev/null || echo "No networks to prune."
+
+            echo "🗑 Clearing unused Docker system resources..."
+            docker system prune -af --volumes 2>/dev/null || echo "Nothing to clean up."
+
+            echo "✅ Docker cleanup complete!"
+          EOF
