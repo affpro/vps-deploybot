@@ -59,6 +59,11 @@ jobs:
               echo "✅ PostgreSQL is already running!"
             fi
 
+            # 🔍 Ensure the 'postgres' superuser exists
+            echo "🔎 Checking if role 'postgres' exists..."
+            docker exec postgres_container psql -U "$POSTGRES_ADMIN_USER" -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='postgres'" | grep -q 1 || \
+            docker exec postgres_container psql -U "$POSTGRES_ADMIN_USER" -d postgres -c "CREATE ROLE postgres WITH SUPERUSER CREATEDB CREATEROLE LOGIN PASSWORD '$POSTGRES_ADMIN_PASS';"
+
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
           EOF
