@@ -110,31 +110,33 @@ jobs:
             # Enable remote connections in postgresql.conf
             docker exec postgres_container bash -c "grep -q '^listen_addresses' /var/lib/postgresql/data/postgresql.conf || echo \"listen_addresses = '*'\" >> /var/lib/postgresql/data/postgresql.conf"
 
-            # Loop through the ALLOWED_IPS variable and add entries to pg_hba.conf
+            # Enable remote connections in postgresql.conf
+            docker exec postgres_container bash -c "sed -i '/^#listen_addresses =/c\listen_addresses = '\''*'\'' ' /var/lib/postgresql/data/postgresql.conf"
+
+            # Ensure pg_hba.conf exists before modifying
+            docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
+
+            # Loop through allowed IPs and add entries
             IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
-            for ip in "\${ip_array[@]}"; do
-              if [[ \$ip =~ / ]]; then
-                # It's already in CIDR format
-                docker exec postgres_container bash -c "grep -q '^host all all \$ip' /var/lib/postgresql/data/pg_hba.conf || echo \"host all all \$ip md5\" >> /var/lib/postgresql/data/pg_hba.conf"
+            for ip in "${ip_array[@]}"; do
+              if [[ $ip =~ / ]]; then
+                # CIDR format
+                docker exec postgres_container bash -c "grep -q '^host all all $ip' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip md5' | tee -a /var/lib/postgresql/data/pg_hba.conf"
               else
-                # It's a single IP, use /32
-                docker exec postgres_container bash -c "grep -q '^host all all \$ip/32' /var/lib/postgresql/data/pg_hba.conf || echo \"host all all \$ip/32 md5\" >> /var/lib/postgresql/data/pg_hba.conf"
+                # Single IP, use /32
+                docker exec postgres_container bash -c "grep -q '^host all all $ip/32' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip/32 md5' | tee -a /var/lib/postgresql/data/pg_hba.conf"
               fi
             done
+
+            # Ensure correct permissions for PostgreSQL to read the config
+            docker exec postgres_container bash -c "chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
 
             # Restart PostgreSQL to apply changes
             docker restart postgres_container
 
-            # Check for any errors in container logs
-            docker logs postgres_container || true
+            # Verify PostgreSQL is running
+            sleep 5
+            docker logs postgres_container --tail 50
+
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
-
-            # Ensure firewall allows connections only from these IPs
-            for ip in "\${ip_array[@]}"; do
-              sudo ufw allow from \$ip to any port 5432 proto tcp
-            done
-
-            # Reload UFW to apply changes
-            sudo ufw reload
-            echo "✅ Firewall updated to allow PostgreSQL access from only the allowed IPs!"
           EOF
