@@ -90,22 +90,32 @@ jobs:
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             bash -s -- "${{ secrets.ALLOWED_IPS }}" << 'EOF'
             ALLOWED_IPS=$1
+
             echo "🔎 Checking PostgreSQL remote access settings..."
+
+            # Ensure pg_hba.conf exists and has correct permissions
+            docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
+
+            # Update postgresql.conf to listen on all interfaces
             docker exec postgres_container bash -c "sed -i '/^#listen_addresses =/c\listen_addresses = '\''*'\'' ' /var/lib/postgresql/data/postgresql.conf"
-            docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
-            IFS=',' read -r -a ip_array <<< "${{ secrets.ALLOWED_IPS }}"
+
+            # Modify pg_hba.conf to allow access from specified IPs
+            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
             for ip in "${ip_array[@]}"; do
               if [[ $ip =~ / ]]; then
-                docker exec postgres_container bash -c "grep -q '^host all all $ip' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip md5' | tee -a /var/lib/postgresql/data/pg_hba.conf"
+                docker exec postgres_container bash -c "grep -q '^host all all $ip' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip md5' >> /var/lib/postgresql/data/pg_hba.conf"
               else
-                docker exec postgres_container bash -c "grep -q '^host all all $ip/32' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip/32 md5' | tee -a /var/lib/postgresql/data/pg_hba.conf"
+                docker exec postgres_container bash -c "grep -q '^host all all $ip/32' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
               fi
             done
-            docker exec postgres_container bash -c "chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
-            docker restart postgres_container
-            sleep 30
-            docker logs postgres_container --tail 50
+
+            # Reload PostgreSQL configuration instead of restarting
+            echo "🔄 Reloading PostgreSQL configuration..."
+            docker exec postgres_container psql -U postgres -c "SELECT pg_reload_conf();"
+
+            # Verify changes
             echo "🔎 Allowed IPs from pg_hba.conf:"
             docker exec postgres_container grep "^host" /var/lib/postgresql/data/pg_hba.conf
+
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
           EOF
