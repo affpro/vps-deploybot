@@ -59,11 +59,6 @@ jobs:
               echo "✅ PostgreSQL is already running!"
             fi
 
-            # 🔍 Ensure the 'postgres' superuser exists
-            echo "🔎 Checking if role 'postgres' exists..."
-            docker exec postgres_container psql -U "$POSTGRES_ADMIN_USER" -d postgres -tc "SELECT 1 FROM pg_roles WHERE rolname='postgres'" | grep -q 1 || \
-            docker exec postgres_container psql -U "$POSTGRES_ADMIN_USER" -d postgres -c "CREATE ROLE postgres WITH SUPERUSER CREATEDB CREATEROLE LOGIN PASSWORD '$POSTGRES_ADMIN_PASS';"
-
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
           EOF
@@ -106,7 +101,6 @@ jobs:
             echo "🔎 Checking PostgreSQL remote access settings..."
             docker exec postgres_container bash -c "sed -i '/^#listen_addresses =/c\listen_addresses = '\''*'\'' ' /var/lib/postgresql/data/postgresql.conf"
             docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
-            echo "🔍 Processing ALLOWED_IPS: $ALLOWED_IPS"
             IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
             for ip in "${ip_array[@]}"; do
               echo "➡ Adding IP: $ip to pg_hba.conf"
