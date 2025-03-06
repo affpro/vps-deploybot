@@ -37,72 +37,36 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             bash -s -- \
-            "${{ secrets.POSTGRES_TAXI_LAGUNA_DB_NAME }}" \
-            "${{ secrets.POSTGRES_TAXI_LAGUNA_DB_USER }}" \
-            "${{ secrets.POSTGRES_TAXI_LAGUNA_DB_PASS }}" \
-            "${{ secrets.POSTGRES_ALIX_DB_NAME }}" \
-            "${{ secrets.POSTGRES_ALIX_DB_USER }}" \
-            "${{ secrets.POSTGRES_ALIX_DB_PASS }}" \
             "${{ secrets.POSTGRES_ADMIN_USER }}" \
             "${{ secrets.POSTGRES_ADMIN_PASS }}" << 'EOF'
-            
-            POSTGRES_TAXI_LAGUNA_DB_NAME=$1
-            POSTGRES_TAXI_LAGUNA_DB_USER=$2
-            POSTGRES_TAXI_LAGUNA_DB_PASS=$3
-            POSTGRES_ALIX_DB_NAME=$4
-            POSTGRES_ALIX_DB_USER=$5
-            POSTGRES_ALIX_DB_PASS=$6
-            POSTGRES_ADMIN_USER=$7
-            POSTGRES_ADMIN_PASS=$8
-
+      
+            POSTGRES_ADMIN_USER=$1
+            POSTGRES_ADMIN_PASS=$2
+      
             echo "🔎 Checking PostgreSQL in Docker..."
-
+      
             if ! docker ps --format '{{.Names}}' | grep -q postgres_container; then
               echo "❌ PostgreSQL is not running. Installing..."
-
+      
               # Pull PostgreSQL image
               docker pull postgres:latest
-
-              # Create an init script to wait for PostgreSQL to start and then initialize the databases
-              echo "#!/bin/bash" > init-db.sh
-              echo "set -e" >> init-db.sh
-              echo "" >> init-db.sh
-              echo "# Wait for PostgreSQL to be ready before starting the initialization" >> init-db.sh
-              echo "until psql -U \"\$POSTGRES_USER\" -c '\l'; do" >> init-db.sh
-              echo "  echo \"Waiting for PostgreSQL to start...\"" >> init-db.sh
-              echo "  sleep 2" >> init-db.sh
-              echo "done" >> init-db.sh
-              echo "" >> init-db.sh
-              echo "# Create the databases and users" >> init-db.sh
-              echo "psql -v ON_ERROR_STOP=1 --username \"\$POSTGRES_USER\" <<EOSQL" >> init-db.sh
-              echo "CREATE DATABASE \"\$POSTGRES_TAXI_LAGUNA_DB_NAME\";" >> init-db.sh
-              echo "CREATE USER \"\$POSTGRES_TAXI_LAGUNA_DB_USER\" WITH ENCRYPTED PASSWORD '\$POSTGRES_TAXI_LAGUNA_DB_PASS';" >> init-db.sh
-              echo "GRANT ALL PRIVILEGES ON DATABASE \"\$POSTGRES_TAXI_LAGUNA_DB_NAME\" TO \"\$POSTGRES_TAXI_LAGUNA_DB_USER\";" >> init-db.sh
-              echo "" >> init-db.sh
-              echo "CREATE DATABASE \"\$POSTGRES_ALIX_DB_NAME\";" >> init-db.sh
-              echo "CREATE USER \"\$POSTGRES_ALIX_DB_USER\" WITH ENCRYPTED PASSWORD '\$POSTGRES_ALIX_DB_PASS';" >> init-db.sh
-              echo "GRANT ALL PRIVILEGES ON DATABASE \"\$POSTGRES_ALIX_DB_NAME\" TO \"\$POSTGRES_ALIX_DB_USER\";" >> init-db.sh
-              echo "EOSQL" >> init-db.sh
-
-              chmod +x init-db.sh
-
-              # Run PostgreSQL with secrets and mount init-db.sh for initialization
+      
+              # Run PostgreSQL with admin user only
               docker run -d \
                 --name postgres_container \
                 -e POSTGRES_USER=$POSTGRES_ADMIN_USER \
                 -e POSTGRES_PASSWORD=$POSTGRES_ADMIN_PASS \
-                -e POSTGRES_DB=defaultdb \
+                -e POSTGRES_DB=postgres \
                 -p 5432:5432 \
                 -v postgres_data:/var/lib/postgresql/data \
-                -v $(pwd)/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh \
                 --restart always \
                 postgres:latest
-
-              echo "✅ PostgreSQL installed and running with multiple databases!"
+      
+              echo "✅ PostgreSQL installed and running with admin user only!"
             else
               echo "✅ PostgreSQL is already running!"
             fi
-
+      
             # Open port 5432
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
