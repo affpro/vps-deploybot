@@ -85,44 +85,35 @@ jobs:
             echo "✅ PostgreSQL is ready and accepting connections!"
           EOF
 
+      - name: Enable UFW Firewall 🔥
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            echo "🔧 Enabling UFW Firewall..."
+            sudo ufw allow OpenSSH
+            sudo ufw --force enable
+            echo "✅ UFW Firewall is now enabled!"
+          EOF
+
       - name: Configure PostgreSQL for Limited Remote Access 🌍
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            bash -s -- "${{ secrets.ALLOWED_IPS }}" << 'EOF'
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             ALLOWED_IPS=$1
-
             echo "🔎 Checking PostgreSQL remote access settings..."
-
-            echo "Listing allowed IPs from secrets..."
+            docker exec postgres_container bash -c "sed -i '/^#listen_addresses =/c\listen_addresses = '\''*'\'' ' /var/lib/postgresql/data/postgresql.conf"
+            docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
             echo "🔍 Processing ALLOWED_IPS: $ALLOWED_IPS"
             IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
             for ip in "${ip_array[@]}"; do
               echo "➡ Adding IP: $ip to pg_hba.conf"
+              docker exec postgres_container bash -c "echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
             done
-
-            # Ensure pg_hba.conf exists and has correct permissions
-            docker exec postgres_container bash -c "touch /var/lib/postgresql/data/pg_hba.conf && chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
-
-            # Update postgresql.conf to listen on all interfaces
-            docker exec postgres_container bash -c "sed -i '/^#listen_addresses =/c\listen_addresses = '\''*'\'' ' /var/lib/postgresql/data/postgresql.conf"
-
-            # Modify pg_hba.conf to allow access from specified IPs
-            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
-            for ip in "${ip_array[@]}"; do
-              if [[ $ip =~ / ]]; then
-                docker exec postgres_container bash -c "grep -q '^host all all $ip' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip md5' >> /var/lib/postgresql/data/pg_hba.conf"
-              else
-                docker exec postgres_container bash -c "grep -q '^host all all $ip/32' /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
-              fi
-            done
-
-            # Reload PostgreSQL configuration instead of restarting
-            echo "🔄 Reloading PostgreSQL configuration..."
+            docker exec postgres_container bash -c "chmod 600 /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
             docker exec postgres_container psql -U postgres -c "SELECT pg_reload_conf();"
-
-            # Verify changes
             echo "🔎 Allowed IPs from pg_hba.conf:"
             docker exec postgres_container grep "^host" /var/lib/postgresql/data/pg_hba.conf
-
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
+            echo "🔎 Verifying PostgreSQL is listening on correct interfaces..."
+            docker exec postgres_container psql -U postgres -c "SHOW listen_addresses;"
+            echo "🔎 Checking firewall rules..."
+            sudo ufw status | grep 5432
           EOF
