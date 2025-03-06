@@ -135,7 +135,7 @@ jobs:
             docker restart postgres_container
 
             # Verify PostgreSQL is running
-            sleep 5
+            sleep 30
             docker logs postgres_container --tail 50
 
             echo "✅ PostgreSQL is now accessible only from the specified IPs!"
