@@ -1,27 +1,26 @@
-# actions/ssh-setup/action.yml
 name: SSH Setup & Connect (Ubuntu)
-description: Write SSH key, add host to known_hosts, and connect to VPS
+description: "Write SSH key, add host to known_hosts, and connect to VPS"
 inputs:
   host:
-    description: VPS hostname or IP
+    description: "VPS hostname or IP"
     required: true
   user:
-    description: SSH username
+    description: "SSH username"
     required: true
   private_key:
-    description: OpenSSH private key contents
+    description: "OpenSSH private key contents"
     required: true
   port:
-    description: SSH port
+    description: "SSH port"
     required: false
     default: "22"
   strict_host_key_checking:
-    description: yes|no (matches your original: no)
+    description: "yes|no (defaults to no)"
     required: false
     default: "no"
 
 runs:
-  using: composite
+  using: "composite"
   steps:
     - name: Validate inputs
       shell: bash
@@ -35,7 +34,6 @@ runs:
       run: |
         set -euo pipefail
         mkdir -p ~/.ssh && chmod 700 ~/.ssh
-        # Preserve newlines; strip CR if pasted from Windows
         printf '%s' "${{ inputs.private_key }}" | tr -d '\r' > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" >> ~/.ssh/known_hosts
