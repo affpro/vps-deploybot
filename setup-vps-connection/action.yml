@@ -1,5 +1,7 @@
+# actions/ssh-setup/action.yml
 name: SSH Setup & Connect (Ubuntu)
 description: "Write SSH key, add host to known_hosts, and connect to VPS"
+
 inputs:
   host:
     description: "VPS hostname or IP"
@@ -15,35 +17,28 @@ inputs:
     required: false
     default: "22"
   strict_host_key_checking:
-    description: "yes|no (defaults to no)"
+    description: "yes|no"
     required: false
     default: "no"
 
 runs:
   using: "composite"
   steps:
-    - name: Validate inputs
+    - name: Setup SSH Key
       shell: bash
       run: |
-        [ -n "${{ inputs.host }}" ] || { echo "❌ inputs.host is empty"; exit 1; }
-        [ -n "${{ inputs.user }}" ] || { echo "❌ inputs.user is empty"; exit 1; }
-        [ -n "${{ inputs.private_key }}" ] || { echo "❌ inputs.private_key is empty"; exit 1; }
-
-    - name: Setup SSH Key 🔑
-      shell: bash
-      run: |
-        set -euo pipefail
         mkdir -p ~/.ssh && chmod 700 ~/.ssh
         printf '%s' "${{ inputs.private_key }}" | tr -d '\r' > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" >> ~/.ssh/known_hosts
+        # Silence ssh-keyscan banner lines (stderr) to avoid red text
+        ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" 2>/dev/null >> ~/.ssh/known_hosts
 
-    - name: Connect to VPS ✅
+    - name: Connect to VPS
       shell: bash
       run: |
-        set -euo pipefail
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=${{ inputs.strict_host_key_checking }} \
           -o IdentitiesOnly=yes \
+          -o LogLevel=ERROR \
           "${{ inputs.user }}@${{ inputs.host }}" \
           "echo Connected to VPS: \$(hostname)"
