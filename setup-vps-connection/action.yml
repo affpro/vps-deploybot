@@ -1,5 +1,5 @@
 # actions/ssh-setup/action.yml
-name: SSH Setup & Connect (Ubuntu)
+name: Setup SSH key & Connect (Ubuntu)
 description: "Write SSH key, add host to known_hosts, and connect to VPS"
 
 inputs:
