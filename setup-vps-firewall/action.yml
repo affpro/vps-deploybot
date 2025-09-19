@@ -17,6 +17,7 @@ runs:
   using: "composite"
   steps:
     - name: Enable UFW Firewall 🔥
+      shell: bash
       run: |
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} << 'EOF'
           echo "🔧 Enabling UFW Firewall..."
