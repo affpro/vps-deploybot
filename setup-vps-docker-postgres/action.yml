@@ -70,6 +70,7 @@ runs:
     - name: Check PostgreSQL Connection
       env:
         POSTGRES_ADMIN_USER: ${{ inputs.postgres_admin_user }}
+      shell: bash
       run: |
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
           set -e
