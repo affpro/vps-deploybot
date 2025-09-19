@@ -1,0 +1,183 @@
+name: Check & Install Docker on VPS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check-install-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH Key 🔑
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # robust key write
+          printf '%s' "${{ secrets.VPS_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # don't fail if keyscan hiccups
+          ssh-keyscan -H -p 22 "${{ secrets.VPS_HOST }}" 2>/dev/null >> ~/.ssh/known_hosts || true
+
+      - name: Connect to VPS & Check Docker
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" << 'EOF'
+            set -euo pipefail
+            echo "✅ Connected to VPS: $(hostname)"
+            if ! command -v docker >/dev/null 2>&1; then
+                echo "❌ Docker is not installed. Installing now..."
+                export DEBIAN_FRONTEND=noninteractive
+                sudo apt-get update -y
+                sudo apt-get install -y docker.io
+                sudo systemctl enable --now docker
+                echo "✅ Docker installed: $(docker --version)"
+            else
+                echo "✅ Docker is already installed: $(docker --version)"
+                sudo systemctl enable --now docker || true
+            fi
+          EOF
+
+      - name: Check & Install PostgreSQL in Docker (Secure)
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            bash -s -- "${{ secrets.POSTGRES_ADMIN_USER }}" "${{ secrets.POSTGRES_ADMIN_PASS }}" << 'EOF'
+            set -euo pipefail
+            POSTGRES_ADMIN_USER="$1"
+            POSTGRES_ADMIN_PASS="$2"
+
+            CONTAINER=postgres_container
+            IMAGE=postgres:16  # pin major
+
+            echo "🔎 Ensuring PostgreSQL container..."
+            status=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "none")
+
+            if [ "$status" = "running" ]; then
+              echo "✅ Container is running."
+            elif [ "$status" = "restarting" ] || [ "$status" = "exited" ] || [ "$status" = "dead" ]; then
+              echo "ℹ️ Container exists but state=$status. Showing logs:"
+              sudo docker logs --tail=200 "$CONTAINER" || true
+              echo "Attempting to start..."
+              sudo docker start "$CONTAINER" || true
+            else
+              echo "❌ Container not found. Creating..."
+              sudo docker pull "$IMAGE"
+              sudo docker run -d \
+                --name "$CONTAINER" \
+                -e POSTGRES_USER="$POSTGRES_ADMIN_USER" \
+                -e POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASS" \
+                -e POSTGRES_DB=postgres \
+                -p 5432:5432 \
+                -v postgres_data:/var/lib/postgresql/data \
+                --health-cmd="pg_isready -U ${POSTGRES_ADMIN_USER} -d postgres || exit 1" \
+                --health-interval=5s \
+                --health-retries=20 \
+                --health-timeout=5s \
+                --health-start-period=10s \
+                --restart always \
+                "$IMAGE"
+              echo "✅ Container created."
+            fi
+
+            # Open port (optional)
+            if command -v ufw >/dev/null 2>&1; then
+              sudo ufw allow 5432/tcp || true
+              echo "✅ Port 5432 is open for PostgreSQL!"
+            fi
+          EOF
+
+      - name: Check PostgreSQL Connection (robust)
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            bash -s -- "${{ secrets.POSTGRES_ADMIN_USER }}" << 'EOF'
+            set -euo pipefail
+            POSTGRES_ADMIN_USER="$1"
+            CONTAINER=postgres_container
+
+            echo "⏳ Waiting for container to be running..."
+            for i in $(seq 1 60); do
+              state=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "none")
+              health=$(sudo docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER" 2>/dev/null || echo "none")
+
+              if [ "$state" = "running" ]; then
+                break
+              fi
+
+              if [ "$state" = "restarting" ] || [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+                echo "❌ Container state: status=$state health=$health"
+                echo "---- docker logs (last 200) ----"
+                sudo docker logs --tail=200 "$CONTAINER" || true
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo "⏳ Checking PostgreSQL readiness..."
+            for i in $(seq 1 60); do
+              if sudo docker exec "$CONTAINER" pg_isready -U "$POSTGRES_ADMIN_USER" -d postgres -h 127.0.0.1 >/dev/null 2>&1; then
+                echo "✅ PostgreSQL is ready."
+                exit 0
+              fi
+              echo "🔄 Waiting... ($i/60)"
+              sleep 2
+            done
+
+            echo "❌ Timed out. Logs:"
+            sudo docker logs --tail=200 "$CONTAINER" || true
+            exit 1
+          EOF
+
+      - name: Enable UFW Firewall 🔥
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" << 'EOF'
+            set -euo pipefail
+            if command -v ufw >/dev/null 2>&1; then
+              echo "🔧 Enabling UFW Firewall..."
+              sudo ufw allow OpenSSH || true
+              yes | sudo ufw enable || true
+              echo "✅ UFW Firewall is now enabled!"
+            else
+              echo "ℹ️ UFW not installed; skipping."
+            fi
+          EOF
+
+      - name: Configure PostgreSQL for Limited Remote Access 🌍
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            bash -s -- "${{ secrets.ALLOWED_IPS }}" << 'EOF'
+            set -euo pipefail
+            ALLOWED_IPS="$1"
+            CONTAINER=postgres_container
+
+            echo "🔎 Configuring remote access for: $ALLOWED_IPS"
+
+            # Ensure listen_addresses='*'
+            sudo docker exec "$CONTAINER" bash -c \
+              "sed -i \"s/^#*listen_addresses.*/listen_addresses = '*' /\" /var/lib/postgresql/data/postgresql.conf"
+
+            # Ensure pg_hba.conf exists
+            sudo docker exec "$CONTAINER" bash -c \
+              "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
+
+            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
+            for ip in "${ip_array[@]}"; do
+              ip=$(echo "$ip" | xargs)
+              [ -z "$ip" ] && continue
+              echo "➡ Adding IP: $ip"
+              sudo docker exec "$CONTAINER" bash -c \
+                "grep -q \"^host all all $ip/32 md5\" /var/lib/postgresql/data/pg_hba.conf || echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+            done
+
+            sudo docker exec "$CONTAINER" psql -U postgres -c "SELECT pg_reload_conf();"
+
+            echo "🔎 Allowed IPs:"
+            sudo docker exec "$CONTAINER" grep -E '^host ' /var/lib/postgresql/data/pg_hba.conf || true
+
+            echo "🔎 listen_addresses:"
+            sudo docker exec "$CONTAINER" psql -U postgres -c "SHOW listen_addresses;"
+
+            echo "🔎 UFW rules:"
+            sudo ufw status | grep 5432 || true
+          EOF
