@@ -63,8 +63,7 @@ runs:
 
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
-          EOF
-
+        EOF
     - name: Check PostgreSQL Connection
       shell: bash
       run: |
