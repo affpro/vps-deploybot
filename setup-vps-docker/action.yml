@@ -1,18 +1,6 @@
 name: Docker Check & Install (Ubuntu)
 description: "Check if Docker is missing, install docker.io and enable it"
 
-inputs:
-  host:
-    description: "VPS hostname or IP"
-    required: true
-  user:
-    description: "SSH username"
-    required: true
-  port:
-    description: "SSH port"
-    required: false
-    default: "22"
-
 runs:
   using: "composite"
   steps:
