@@ -23,7 +23,7 @@ runs:
             -o StrictHostKeyChecking=no \
             -o IdentitiesOnly=yes \
             -o LogLevel=ERROR \
-            "${{ secrets.user }}@${{ secrets.host }}" <<'EOF'
+            "${{ inputs.user }}@${{ inputs.host }}" <<'EOF'
           set -euo pipefail
           if ! command -v docker >/dev/null 2>&1; then
             echo "❌ Docker is not installed. Installing..."
