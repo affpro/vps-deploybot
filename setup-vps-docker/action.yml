@@ -1,21 +1,35 @@
 name: Docker Check & Install (Ubuntu)
 description: "Check if Docker is missing, install docker.io and enable it"
 
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+
 runs:
   using: "composite"
   steps:
     - name: Check Docker Installation
       shell: bash
       run: |
-        echo "Connected to VPS: $(hostname)"
-        if ! command -v docker &> /dev/null; then
-          echo "❌ Docker is not installed. Installing..."
-          sudo apt-get update -y
-          sudo apt-get install -y docker.io
-          sudo systemctl enable --now docker
-          echo "✅ Docker installed: $(docker --version)"
-        else
-          echo "✅ Docker is already installed: $(docker --version)"
-          sudo systemctl enable --now docker || true
-        fi
-
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
+            set -e
+            echo "✅ Connected to VPS: $(hostname)"
+            if ! command -v docker &> /dev/null; then
+              echo "❌ Docker is not installed. Installing..."
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io
+              sudo systemctl enable --now docker
+              echo "✅ Docker installed: $(docker --version)"
+            else
+              echo "✅ Docker is already installed: $(docker --version)"
+              sudo systemctl enable --now docker || true
+            fi
+          EOF
