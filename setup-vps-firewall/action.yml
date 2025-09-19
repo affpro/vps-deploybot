@@ -1,0 +1,26 @@
+name: Enable VPS Firewall
+description: "Enable UFW firewall on the VPS to enhance security."
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Enable UFW Firewall 🔥
+      run: |
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} << 'EOF'
+          echo "🔧 Enabling UFW Firewall..."
+          sudo ufw allow OpenSSH
+          sudo ufw --force enable
+          echo "✅ UFW Firewall is now enabled!"
+        EOF
