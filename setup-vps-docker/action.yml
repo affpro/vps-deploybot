@@ -1,0 +1,19 @@
+name: Docker Check & Install (Ubuntu)
+description: "Check if Docker is missing, install docker.io and enable it"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check Docker Installation
+      shell: bash
+      run: |
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "❌ Docker is not installed. Installing..."
+            sudo apt-get update -y
+            sudo apt-get install -y docker.io
+            sudo systemctl enable --now docker
+            echo "✅ Docker installed: $(docker --version)"
+          else
+            echo "✅ Docker is already installed: $(docker --version)"
+            sudo systemctl enable --now docker || true
+          fi
