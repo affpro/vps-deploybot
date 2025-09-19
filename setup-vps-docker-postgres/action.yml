@@ -34,48 +34,44 @@ runs:
         POSTGRES_PORT: ${{ inputs.postgres_port }}
       shell: bash
       run: |
-        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
-          set -e
-          echo "🔎 Checking PostgreSQL in Docker..."
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} \
+            bash -s -- \
+            "${{ inputs.postgres_admin_user }}" \
+            "${{ inputs.postgres_admin_pass }}" << 'EOF'
 
-          CONTAINER=postgres_container
-          if ! sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
-            if sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
-              echo "ℹ️ Found stopped container; starting it..."
-              sudo docker start "${CONTAINER}"
-            else
+            POSTGRES_ADMIN_USER=$1
+            POSTGRES_ADMIN_PASS=$2
+
+            echo "🔎 Checking PostgreSQL in Docker..."
+
+            if ! sudo docker ps --format '{{.Names}}' | grep -q postgres_container; then
               echo "❌ PostgreSQL is not running. Installing..."
               sudo docker pull postgres:latest
               sudo docker run -d \
-                --name "${CONTAINER}" \
-                -e POSTGRES_USER="${POSTGRES_ADMIN_USER}" \
-                -e POSTGRES_PASSWORD="${POSTGRES_ADMIN_PASS}" \
+                --name postgres_container \
+                -e POSTGRES_USER=$POSTGRES_ADMIN_USER \
+                -e POSTGRES_PASSWORD=$POSTGRES_ADMIN_PASS \
                 -e POSTGRES_DB=postgres \
-                -p "${POSTGRES_PORT}:5432" \
+                -p 5432:5432 \
                 -v postgres_data:/var/lib/postgresql/data \
                 --restart always \
                 postgres:latest
               echo "✅ PostgreSQL installed and running with admin user only!"
+            else
+              echo "✅ PostgreSQL is already running!"
             fi
-          else
-            echo "✅ PostgreSQL is already running!"
-          fi
 
-          # Open the port (you can tighten later per IP in the next step)
-          if command -v ufw >/dev/null 2>&1; then
-            sudo ufw allow "${POSTGRES_PORT}"/tcp || true
-            echo "✅ Port ${POSTGRES_PORT} is open for PostgreSQL!"
-          fi
-        EOF
+            sudo ufw allow 5432/tcp
+            echo "✅ Port 5432 is open for PostgreSQL!"
+          EOF
 
     - name: Check PostgreSQL Connection
-      env:
-        POSTGRES_ADMIN_USER: ${{ inputs.postgres_admin_user }}
       shell: bash
       run: |
-        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
-          set -e
-          POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER}"
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} \
+          bash -s -- "${{ inputs.postgres_admin_user }}" << 'EOF'
+
+          POSTGRES_ADMIN_USER=$1
           echo "⏳ Checking PostgreSQL connection..."
           MAX_RETRIES=10
           RETRY_INTERVAL=2
