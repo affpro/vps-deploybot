@@ -18,22 +18,22 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             echo "🛑 Stopping all Docker containers..."
-            docker stop $(docker ps -aq) 2>/dev/null || echo "No running containers."
+            sudo docker stop $(docker ps -aq) 2>/dev/null || echo "No running containers."
 
             echo "🗑 Removing all Docker containers..."
-            docker rm $(docker ps -aq) 2>/dev/null || echo "No containers to remove."
+            sudo docker rm $(docker ps -aq) 2>/dev/null || echo "No containers to remove."
 
             echo "📦 Removing all Docker images..."
-            docker rmi $(docker images -q) -f 2>/dev/null || echo "No images to remove."
+            sudo docker rmi $(docker images -q) -f 2>/dev/null || echo "No images to remove."
 
             echo "📂 Removing all Docker volumes..."
-            docker volume rm $(docker volume ls -q) -f 2>/dev/null || echo "No volumes to remove."
+            sudo docker volume rm $(docker volume ls -q) -f 2>/dev/null || echo "No volumes to remove."
 
             echo "🧹 Removing unused Docker networks..."
-            docker network prune -f 2>/dev/null || echo "No networks to prune."
+            sudo docker network prune -f 2>/dev/null || echo "No networks to prune."
 
             echo "🗑 Clearing unused Docker system resources..."
-            docker system prune -af --volumes 2>/dev/null || echo "Nothing to clean up."
+            sudo docker system prune -af --volumes 2>/dev/null || echo "Nothing to clean up."
 
             echo "✅ Docker cleanup complete!"
           EOF
