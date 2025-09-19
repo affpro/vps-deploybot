@@ -42,10 +42,10 @@ jobs:
 
             echo "🔎 Checking PostgreSQL in Docker..."
 
-            if ! docker ps --format '{{.Names}}' | grep -q postgres_container; then
+            if ! sudo docker ps --format '{{.Names}}' | grep -q postgres_container; then
               echo "❌ PostgreSQL is not running. Installing..."
-              docker pull postgres:latest
-              docker run -d \
+              sudo docker pull postgres:latest
+              sudo docker run -d \
                 --name postgres_container \
                 -e POSTGRES_USER=$POSTGRES_ADMIN_USER \
                 -e POSTGRES_PASSWORD=$POSTGRES_ADMIN_PASS \
@@ -73,7 +73,7 @@ jobs:
             MAX_RETRIES=10
             RETRY_INTERVAL=2
             COUNT=0
-            until docker exec postgres_container pg_isready -U "$POSTGRES_ADMIN_USER" || [ $COUNT -eq $MAX_RETRIES ]; do
+            until sudo docker exec postgres_container pg_isready -U "$POSTGRES_ADMIN_USER" || [ $COUNT -eq $MAX_RETRIES ]; do
               echo "🔄 Waiting for PostgreSQL to be ready... ($COUNT/$MAX_RETRIES)"
               sleep $RETRY_INTERVAL
               COUNT=$((COUNT+1))
