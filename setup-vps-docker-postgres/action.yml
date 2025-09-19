@@ -32,6 +32,7 @@ runs:
         POSTGRES_ADMIN_USER: ${{ inputs.postgres_admin_user }}
         POSTGRES_ADMIN_PASS: ${{ inputs.postgres_admin_pass }}
         POSTGRES_PORT: ${{ inputs.postgres_port }}
+      shell: bash
       run: |
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
           set -e
