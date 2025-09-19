@@ -1,4 +1,4 @@
-name: Check & Install Docker on VPS
+name: Check & Install Docker on VPS v2
 
 on:
   workflow_dispatch:
