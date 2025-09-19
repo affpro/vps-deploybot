@@ -1,0 +1,91 @@
+name: Check and install docker postgres image
+description: "Check if PostgreSQL is installed in Docker, if not install it securely"
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  postgres_admin_user: 
+    description: "PostgreSQL admin username"
+    required: true
+  postgres_admin_pass:
+    description: "PostgreSQL admin password"
+    required: true
+  postgres_port:
+    description: "Public port for PostgreSQL"
+    type: number
+    required: true
+    default: 5432
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check & Install PostgreSQL in Docker (Secure)
+      env:
+        POSTGRES_ADMIN_USER: ${{ inputs.postgres_admin_user }}
+        POSTGRES_ADMIN_PASS: ${{ inputs.postgres_admin_pass }}
+        POSTGRES_PORT: ${{ inputs.postgres_port }}
+      run: |
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
+          set -e
+          echo "🔎 Checking PostgreSQL in Docker..."
+
+          CONTAINER=postgres_container
+          if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+            if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+              echo "ℹ️ Found stopped container; starting it..."
+              docker start "${CONTAINER}"
+            else
+              echo "❌ PostgreSQL is not running. Installing..."
+              docker pull postgres:latest
+              docker run -d \
+                --name "${CONTAINER}" \
+                -e POSTGRES_USER="${POSTGRES_ADMIN_USER}" \
+                -e POSTGRES_PASSWORD="${POSTGRES_ADMIN_PASS}" \
+                -e POSTGRES_DB=postgres \
+                -p "${POSTGRES_PORT}:5432" \
+                -v postgres_data:/var/lib/postgresql/data \
+                --restart always \
+                postgres:latest
+              echo "✅ PostgreSQL installed and running with admin user only!"
+            fi
+          else
+            echo "✅ PostgreSQL is already running!"
+          fi
+
+          # Open the port (you can tighten later per IP in the next step)
+          if command -v ufw >/dev/null 2>&1; then
+            sudo ufw allow "${POSTGRES_PORT}"/tcp || true
+            echo "✅ Port ${POSTGRES_PORT} is open for PostgreSQL!"
+          fi
+        EOF
+
+    - name: Check PostgreSQL Connection
+      env:
+        POSTGRES_ADMIN_USER: ${{ inputs.postgres_admin_user }}
+      run: |
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no "${{ inputs.user }}@${{ inputs.host }}" << 'EOF'
+          set -e
+          POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER}"
+          echo "⏳ Checking PostgreSQL connection..."
+          MAX_RETRIES=10
+          RETRY_INTERVAL=2
+          COUNT=0
+          until docker exec postgres_container pg_isready -U "$POSTGRES_ADMIN_USER" || [ $COUNT -eq $MAX_RETRIES ]; do
+            echo "🔄 Waiting for PostgreSQL to be ready... ($COUNT/$MAX_RETRIES)"
+            sleep $RETRY_INTERVAL
+            COUNT=$((COUNT+1))
+          done
+          if [ $COUNT -eq $MAX_RETRIES ]; then
+            echo "❌ PostgreSQL did not become ready in time. Exiting..."
+            exit 1
+          fi
+          echo "✅ PostgreSQL is ready and accepting connections!"
+        EOF
