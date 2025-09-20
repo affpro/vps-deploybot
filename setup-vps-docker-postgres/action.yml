@@ -175,6 +175,11 @@ runs:
             sudo docker exec "$CONTAINER" bash -c \
               "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
 
+            # Add local host entry for admin user (needed for configuration commands)
+            echo "➡ Adding local access for admin user: $POSTGRES_ADMIN_USER"
+            sudo docker exec "$CONTAINER" bash -c \
+              "echo 'host all $POSTGRES_ADMIN_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+
             # Add host entries for each allowed IP
             IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
             for ip in "${ip_array[@]}"; do
