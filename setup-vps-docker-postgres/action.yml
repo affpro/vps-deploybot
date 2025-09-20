@@ -191,8 +191,20 @@ runs:
                 "echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
             done
 
-            # Reload PostgreSQL configuration
-            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
+            # Restart PostgreSQL to apply configuration changes
+            echo "🔄 Restarting PostgreSQL to apply configuration changes..."
+            sudo docker restart "$CONTAINER"
+
+            # Wait for PostgreSQL to be ready after restart
+            echo "⏳ Waiting for PostgreSQL to be ready after restart..."
+            for i in $(seq 1 30); do
+              if sudo docker exec "$CONTAINER" pg_isready -U "$POSTGRES_ADMIN_USER" -d postgres -h 127.0.0.1 >/dev/null 2>&1; then
+                echo "✅ PostgreSQL is ready after restart."
+                break
+              fi
+              echo "🔄 Waiting for restart... ($i/30)"
+              sleep 2
+            done
 
             echo "🔎 Current PostgreSQL configuration:"
             echo "listen_addresses:"
@@ -207,8 +219,20 @@ runs:
             sudo docker exec "$CONTAINER" bash -c \
               "sed -i \"s/^#*listen_addresses.*/listen_addresses = 'localhost' /\" /var/lib/postgresql/data/postgresql.conf"
 
-            # Reload configuration
-            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
+            # Restart PostgreSQL to apply configuration changes
+            echo "🔄 Restarting PostgreSQL for local-only access..."
+            sudo docker restart "$CONTAINER"
+
+            # Wait for PostgreSQL to be ready after restart
+            echo "⏳ Waiting for PostgreSQL to be ready after restart..."
+            for i in $(seq 1 30); do
+              if sudo docker exec "$CONTAINER" pg_isready -U "$POSTGRES_ADMIN_USER" -d postgres -h 127.0.0.1 >/dev/null 2>&1; then
+                echo "✅ PostgreSQL is ready after restart."
+                break
+              fi
+              echo "🔄 Waiting for restart... ($i/30)"
+              sleep 2
+            done
 
             echo "ℹ️ PostgreSQL configured for local access only"
           fi
