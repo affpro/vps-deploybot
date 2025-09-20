@@ -1,0 +1,150 @@
+name: Deploy Docker Image to VPS
+description: "Transfer Docker image archive to VPS and deploy as container with zero-downtime deployment"
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  private_key:
+    description: "SSH private key content"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  image_archive:
+    description: "Path to the Docker image archive file (e.g., 'app.tar.gz')"
+    required: true
+  container_name:
+    description: "Name for the Docker container"
+    required: true
+  docker_run_args:
+    description: "Additional arguments for docker run command (ports, env vars, volumes, etc.)"
+    required: false
+    default: ""
+  health_check_url:
+    description: "URL to check container health after deployment (optional)"
+    required: false
+    default: ""
+  health_check_timeout:
+    description: "Timeout in seconds for health check"
+    required: false
+    default: "60"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup SSH Key and Connection
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh && chmod 700 ~/.ssh
+        printf '%s' "${{ inputs.private_key }}" | tr -d '\r' > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" 2>/dev/null >> ~/.ssh/known_hosts || true
+
+    - name: Transfer Docker Image to VPS
+      shell: bash
+      run: |
+        echo "📦 Transferring Docker image to VPS..."
+        scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no \
+          "${{ inputs.image_archive }}" \
+          "${{ inputs.user }}@${{ inputs.host }}:~/docker-images/"
+
+    - name: Deploy Docker Container
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          bash -s -- \
+          "${{ inputs.image_archive }}" \
+          "${{ inputs.container_name }}" \
+          "${{ inputs.docker_run_args }}" << 'EOF'
+          set -euo pipefail
+
+          IMAGE_ARCHIVE="$1"
+          CONTAINER_NAME="$2"
+          DOCKER_RUN_ARGS="$3"
+
+          echo "🚀 Starting Docker deployment process..."
+
+          # Ensure docker-images directory exists
+          mkdir -p ~/docker-images
+          cd ~/docker-images
+
+          # Extract image name from archive
+          IMAGE_NAME=$(echo "$IMAGE_ARCHIVE" | sed 's/\.tar\.gz$//')
+
+          echo "📦 Loading Docker image from archive..."
+          sudo docker load < "$IMAGE_ARCHIVE"
+
+          # Stop and remove existing container if it exists
+          if sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+            echo "🛑 Stopping existing container: $CONTAINER_NAME"
+            sudo docker stop "$CONTAINER_NAME" || true
+            echo "🗑 Removing existing container: $CONTAINER_NAME"
+            sudo docker rm "$CONTAINER_NAME" || true
+          fi
+
+          # Clean up old images (keep latest)
+          echo "🧹 Cleaning up old Docker images..."
+          sudo docker images "$IMAGE_NAME" --format "table {{.ID}}\t{{.CreatedAt}}" | \
+            tail -n +2 | head -n -1 | awk '{print $1}' | \
+            xargs -r sudo docker rmi || true
+
+          # Run new container
+          echo "🔄 Starting new container: $CONTAINER_NAME"
+          eval "sudo docker run -d --name \"$CONTAINER_NAME\" $DOCKER_RUN_ARGS \"$IMAGE_NAME:latest\""
+
+          # Verify container is running
+          echo "⏳ Waiting for container to start..."
+          for i in $(seq 1 30); do
+            if sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+              echo "✅ Container $CONTAINER_NAME is running"
+              break
+            fi
+            echo "🔄 Waiting for container... ($i/30)"
+            sleep 2
+          done
+
+          # Show container status
+          echo "📊 Container status:"
+          sudo docker ps --filter "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+          # Show recent logs
+          echo "📝 Recent container logs:"
+          sudo docker logs --tail=20 "$CONTAINER_NAME" || true
+
+          # Clean up the archive file
+          rm -f "$IMAGE_ARCHIVE"
+
+          echo "✅ Deployment completed successfully!"
+        EOF
+
+    - name: Health Check (Optional)
+      shell: bash
+      if: ${{ inputs.health_check_url != '' }}
+      run: |
+        echo "🏥 Performing health check..."
+        HEALTH_URL="${{ inputs.health_check_url }}"
+        TIMEOUT="${{ inputs.health_check_timeout }}"
+
+        for i in $(seq 1 $TIMEOUT); do
+          if curl -f -s "$HEALTH_URL" >/dev/null 2>&1; then
+            echo "✅ Health check passed: $HEALTH_URL"
+            exit 0
+          fi
+          echo "🔄 Health check attempt $i/$TIMEOUT..."
+          sleep 1
+        done
+
+        echo "❌ Health check failed after $TIMEOUT seconds"
+        echo "🔍 Checking container logs for issues:"
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "sudo docker logs --tail=50 ${{ inputs.container_name }}"
+        exit 1
