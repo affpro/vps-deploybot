@@ -149,10 +149,11 @@ runs:
       shell: bash
       run: |
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} \
-          bash -s -- "${{ inputs.allowed_ips }}" "${{ inputs.postgres_admin_user }}" << 'EOF'
+          bash -s -- "${{ inputs.allowed_ips }}" "${{ inputs.postgres_admin_user }}" "${{ inputs.postgres_admin_pass }}" << 'EOF'
           set -euo pipefail
           ALLOWED_IPS="$1"
           POSTGRES_ADMIN_USER="$2"
+          POSTGRES_ADMIN_PASS="$3"
           CONTAINER=postgres_container
 
           # Clean up existing pg_hba.conf host entries and configure fresh access
