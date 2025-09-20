@@ -44,45 +44,80 @@ runs:
 
             echo "🔎 Checking PostgreSQL in Docker..."
 
-            if ! sudo docker ps --format '{{.Names}}' | grep -q postgres_container; then
-              echo "❌ PostgreSQL is not running. Installing..."
-              sudo docker pull postgres:latest
+            CONTAINER=postgres_container
+            IMAGE=postgres:16
+
+            echo "🔎 Ensuring PostgreSQL container..."
+            status=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "none")
+
+            if [ "$status" = "running" ]; then
+              echo "✅ Container is running."
+            elif [ "$status" = "restarting" ] || [ "$status" = "exited" ] || [ "$status" = "dead" ]; then
+              echo "ℹ️ Container exists but state=$status. Showing logs:"
+              sudo docker logs --tail=50 "$CONTAINER" || true
+              echo "Attempting to start..."
+              sudo docker start "$CONTAINER" || true
+            else
+              echo "❌ Container not found. Creating..."
+              sudo docker pull "$IMAGE"
               sudo docker run -d \
-                --name postgres_container \
-                -e POSTGRES_USER=$POSTGRES_ADMIN_USER \
-                -e POSTGRES_PASSWORD=$POSTGRES_ADMIN_PASS \
+                --name "$CONTAINER" \
+                -e POSTGRES_USER="$POSTGRES_ADMIN_USER" \
+                -e POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASS" \
                 -e POSTGRES_DB=postgres \
                 -p 5432:5432 \
                 -v postgres_data:/var/lib/postgresql/data \
+                --health-cmd="pg_isready -U ${POSTGRES_ADMIN_USER} -d postgres || exit 1" \
+                --health-interval=5s \
+                --health-retries=20 \
+                --health-timeout=5s \
+                --health-start-period=10s \
                 --restart always \
-                postgres:latest
-              echo "✅ PostgreSQL installed and running with admin user only!"
-            else
-              echo "✅ PostgreSQL is already running!"
+                "$IMAGE"
+              echo "✅ Container created with health checks."
             fi
 
             sudo ufw allow 5432/tcp
             echo "✅ Port 5432 is open for PostgreSQL!"
         EOF
-    - name: Check PostgreSQL Connection
+    - name: Check PostgreSQL Connection (robust)
       shell: bash
       run: |
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} \
           bash -s -- "${{ inputs.postgres_admin_user }}" << 'EOF'
+          set -euo pipefail
+          POSTGRES_ADMIN_USER="$1"
+          CONTAINER=postgres_container
 
-          POSTGRES_ADMIN_USER=$1
-          echo "⏳ Checking PostgreSQL connection..."
-          MAX_RETRIES=10
-          RETRY_INTERVAL=2
-          COUNT=0
-          until sudo docker exec postgres_container pg_isready -U "$POSTGRES_ADMIN_USER" || [ $COUNT -eq $MAX_RETRIES ]; do
-            echo "🔄 Waiting for PostgreSQL to be ready... ($COUNT/$MAX_RETRIES)"
-            sleep $RETRY_INTERVAL
-            COUNT=$((COUNT+1))
+          echo "⏳ Waiting for container to be running..."
+          for i in $(seq 1 60); do
+            state=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "none")
+            health=$(sudo docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER" 2>/dev/null || echo "none")
+
+            if [ "$state" = "running" ]; then
+              break
+            fi
+
+            if [ "$state" = "restarting" ] || [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+              echo "❌ Container state: status=$state health=$health"
+              echo "---- docker logs (last 50) ----"
+              sudo docker logs --tail=50 "$CONTAINER" || true
+              exit 1
+            fi
+            sleep 2
           done
-          if [ $COUNT -eq $MAX_RETRIES ]; then
-            echo "❌ PostgreSQL did not become ready in time. Exiting..."
-            exit 1
-          fi
-          echo "✅ PostgreSQL is ready and accepting connections!"
+
+          echo "⏳ Checking PostgreSQL readiness..."
+          for i in $(seq 1 60); do
+            if sudo docker exec "$CONTAINER" pg_isready -U "$POSTGRES_ADMIN_USER" -d postgres -h 127.0.0.1 >/dev/null 2>&1; then
+              echo "✅ PostgreSQL is ready."
+              exit 0
+            fi
+            echo "🔄 Waiting... ($i/60)"
+            sleep 2
+          done
+
+          echo "❌ Timed out. Logs:"
+          sudo docker logs --tail=50 "$CONTAINER" || true
+          exit 1
         EOF

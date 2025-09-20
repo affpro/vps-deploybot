@@ -10,30 +10,57 @@ jobs:
     steps:
       - name: Setup SSH Key 🔑
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_rsa
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # robust key write
+          printf '%s' "${{ secrets.VPS_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          # don't fail if keyscan hiccups
+          ssh-keyscan -H -p 22 "${{ secrets.VPS_HOST }}" 2>/dev/null >> ~/.ssh/known_hosts || true
       - name: Cleanup Docker on VPS
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" << 'EOF'
+            set -euo pipefail
+            echo "🔍 Starting comprehensive Docker cleanup..."
+
             echo "🛑 Stopping all Docker containers..."
-            sudo docker stop $(docker ps -aq) 2>/dev/null || echo "No running containers."
+            if [ "$(sudo docker ps -q)" ]; then
+              sudo docker stop $(sudo docker ps -q) || echo "Failed to stop some containers"
+            else
+              echo "No running containers to stop."
+            fi
 
             echo "🗑 Removing all Docker containers..."
-            sudo docker rm $(docker ps -aq) 2>/dev/null || echo "No containers to remove."
+            if [ "$(sudo docker ps -aq)" ]; then
+              sudo docker rm -f $(sudo docker ps -aq) || echo "Failed to remove some containers"
+            else
+              echo "No containers to remove."
+            fi
 
             echo "📦 Removing all Docker images..."
-            sudo docker rmi $(docker images -q) -f 2>/dev/null || echo "No images to remove."
+            if [ "$(sudo docker images -q)" ]; then
+              sudo docker rmi -f $(sudo docker images -q) || echo "Failed to remove some images"
+            else
+              echo "No images to remove."
+            fi
 
             echo "📂 Removing all Docker volumes..."
-            sudo docker volume rm $(docker volume ls -q) -f 2>/dev/null || echo "No volumes to remove."
+            if [ "$(sudo docker volume ls -q)" ]; then
+              sudo docker volume rm -f $(sudo docker volume ls -q) || echo "Failed to remove some volumes"
+            else
+              echo "No volumes to remove."
+            fi
 
-            echo "🧹 Removing unused Docker networks..."
-            sudo docker network prune -f 2>/dev/null || echo "No networks to prune."
+            echo "🧹 Pruning Docker networks..."
+            sudo docker network prune -f || echo "Failed to prune networks"
 
-            echo "🗑 Clearing unused Docker system resources..."
-            sudo docker system prune -af --volumes 2>/dev/null || echo "Nothing to clean up."
+            echo "🗑 Final system cleanup..."
+            sudo docker system prune -af --volumes || echo "System prune failed"
+
+            echo "📊 Remaining Docker objects:"
+            echo "Containers: $(sudo docker ps -a --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null | wc -l || echo 0)"
+            echo "Images: $(sudo docker images --format 'table {{.Repository}}\t{{.Tag}}' 2>/dev/null | wc -l || echo 0)"
+            echo "Volumes: $(sudo docker volume ls --format 'table {{.Name}}' 2>/dev/null | wc -l || echo 0)"
 
             echo "✅ Docker cleanup complete!"
           EOF
