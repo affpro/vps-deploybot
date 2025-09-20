@@ -186,11 +186,11 @@ runs:
             done
 
             # Reload PostgreSQL configuration
-            sudo docker exec "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
+            sudo docker exec "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
 
             echo "🔎 Current PostgreSQL configuration:"
             echo "listen_addresses:"
-            sudo docker exec "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -c "SHOW listen_addresses;" || true
+            sudo docker exec "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres -c "SHOW listen_addresses;" || true
             echo "Allowed host entries:"
             sudo docker exec "$CONTAINER" grep -E '^host ' /var/lib/postgresql/data/pg_hba.conf || true
 
@@ -202,7 +202,7 @@ runs:
               "sed -i \"s/^#*listen_addresses.*/listen_addresses = 'localhost' /\" /var/lib/postgresql/data/postgresql.conf"
 
             # Reload configuration
-            sudo docker exec "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
+            sudo docker exec "$CONTAINER" psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
 
             echo "ℹ️ PostgreSQL configured for local access only"
           fi
