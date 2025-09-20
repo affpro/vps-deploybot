@@ -23,6 +23,10 @@ inputs:
     type: number
     required: true
     default: 5432
+  allowed_ips:
+    description: "Comma-separated list of IPs allowed to access PostgreSQL (e.g., '1.2.3.4,5.6.7.8'). Leave empty for local access only."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -37,10 +41,12 @@ runs:
         ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} \
             bash -s -- \
             "${{ inputs.postgres_admin_user }}" \
-            "${{ inputs.postgres_admin_pass }}" << 'EOF'
+            "${{ inputs.postgres_admin_pass }}" \
+            "${{ inputs.allowed_ips }}" << 'EOF'
 
             POSTGRES_ADMIN_USER=$1
             POSTGRES_ADMIN_PASS=$2
+            ALLOWED_IPS=$3
 
             echo "🔎 Checking PostgreSQL in Docker..."
 
@@ -77,8 +83,26 @@ runs:
               echo "✅ Container created with health checks."
             fi
 
-            sudo ufw allow 5432/tcp
-            echo "✅ Port 5432 is open for PostgreSQL!"
+            # Clean up existing UFW rules for PostgreSQL port 5432
+            echo "🧹 Cleaning up existing UFW rules for PostgreSQL port 5432..."
+            sudo ufw status numbered | grep "5432" | grep -o "^\[ *[0-9]* *\]" | sed 's/\[//;s/\]//' | sort -nr | while read -r rule_num; do
+              [ -n "$rule_num" ] && echo "y" | sudo ufw delete "$rule_num" || true
+            done
+
+            # Configure firewall rules based on allowed IPs
+            if [ -n "$ALLOWED_IPS" ]; then
+              echo "🔧 Configuring UFW rules for specific IPs..."
+              IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
+              for ip in "${ip_array[@]}"; do
+                ip=$(echo "$ip" | xargs)
+                [ -z "$ip" ] && continue
+                echo "➡ Allowing PostgreSQL access from IP: $ip"
+                sudo ufw allow from "$ip" to any port 5432 || echo "Failed to add rule for $ip"
+              done
+              echo "✅ UFW rules configured for specified IPs only!"
+            else
+              echo "ℹ️ No allowed IPs specified - PostgreSQL accessible locally only"
+            fi
         EOF
     - name: Check PostgreSQL Connection (robust)
       shell: bash
@@ -120,4 +144,65 @@ runs:
           echo "❌ Timed out. Logs:"
           sudo docker logs --tail=50 "$CONTAINER" || true
           exit 1
+        EOF
+    - name: Configure PostgreSQL Remote Access
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ inputs.user }}@${{ inputs.host }} \
+          bash -s -- "${{ inputs.allowed_ips }}" << 'EOF'
+          set -euo pipefail
+          ALLOWED_IPS="$1"
+          CONTAINER=postgres_container
+
+          # Clean up existing pg_hba.conf host entries and configure fresh access
+          echo "🧹 Cleaning up existing PostgreSQL host access entries..."
+          sudo docker exec "$CONTAINER" bash -c \
+            "cp /var/lib/postgresql/data/pg_hba.conf /var/lib/postgresql/data/pg_hba.conf.backup 2>/dev/null || true"
+
+          # Remove all existing host entries (lines starting with 'host')
+          sudo docker exec "$CONTAINER" bash -c \
+            "sed -i '/^host /d' /var/lib/postgresql/data/pg_hba.conf"
+
+          if [ -n "$ALLOWED_IPS" ]; then
+            echo "🔎 Configuring PostgreSQL for remote access: $ALLOWED_IPS"
+
+            # Ensure listen_addresses='*' for remote connections
+            sudo docker exec "$CONTAINER" bash -c \
+              "sed -i \"s/^#*listen_addresses.*/listen_addresses = '*' /\" /var/lib/postgresql/data/postgresql.conf"
+
+            # Ensure pg_hba.conf exists with correct permissions
+            sudo docker exec "$CONTAINER" bash -c \
+              "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
+
+            # Add host entries for each allowed IP
+            IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
+            for ip in "${ip_array[@]}"; do
+              ip=$(echo "$ip" | xargs)
+              [ -z "$ip" ] && continue
+              echo "➡ Adding PostgreSQL access for IP: $ip"
+              sudo docker exec "$CONTAINER" bash -c \
+                "echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+            done
+
+            # Reload PostgreSQL configuration
+            sudo docker exec "$CONTAINER" psql -U postgres -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
+
+            echo "🔎 Current PostgreSQL configuration:"
+            echo "listen_addresses:"
+            sudo docker exec "$CONTAINER" psql -U postgres -c "SHOW listen_addresses;" || true
+            echo "Allowed host entries:"
+            sudo docker exec "$CONTAINER" grep -E '^host ' /var/lib/postgresql/data/pg_hba.conf || true
+
+            echo "✅ PostgreSQL configured for remote access from specified IPs"
+          else
+            echo "🔒 Configuring PostgreSQL for local access only..."
+            # Set listen_addresses to localhost for local-only access
+            sudo docker exec "$CONTAINER" bash -c \
+              "sed -i \"s/^#*listen_addresses.*/listen_addresses = 'localhost' /\" /var/lib/postgresql/data/postgresql.conf"
+
+            # Reload configuration
+            sudo docker exec "$CONTAINER" psql -U postgres -c "SELECT pg_reload_conf();" || echo "Config reload failed, may need restart"
+
+            echo "ℹ️ PostgreSQL configured for local access only"
+          fi
         EOF
