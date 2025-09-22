@@ -102,7 +102,8 @@ runs:
 
           # Run new container
           echo "🔄 Starting new container: $CONTAINER_NAME"
-          eval "sudo docker run -d --name \"$CONTAINER_NAME\" $DOCKER_RUN_ARGS \"$IMAGE_NAME:latest\""
+          echo "Using docker run args: $DOCKER_RUN_ARGS"
+          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest"
 
           # Verify container is running
           echo "⏳ Waiting for container to start..."
