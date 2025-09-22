@@ -85,10 +85,10 @@ runs:
           if [ -n "$PACKAGE_AUTH_TOKEN" ]; then
             echo "🔐 Setting up .npmrc for GitHub package authentication..."
             cat > ~/.npmrc << NPMRC_EOF
-@emtrade-team:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=$PACKAGE_AUTH_TOKEN
-always-auth=true
-NPMRC_EOF
+            @emtrade-team:registry=https://npm.pkg.github.com
+            //npm.pkg.github.com/:_authToken=$PACKAGE_AUTH_TOKEN
+            always-auth=true
+            NPMRC_EOF
             echo "✅ .npmrc file created for GitHub packages"
           fi
 
