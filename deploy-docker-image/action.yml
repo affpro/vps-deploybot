@@ -60,19 +60,16 @@ runs:
 
     - name: Deploy Docker Container
       shell: bash
+      env:
+        IMAGE_ARCHIVE: "${{ inputs.image_archive }}"
+        CONTAINER_NAME: "${{ inputs.container_name }}"
+        DOCKER_RUN_ARGS: "${{ inputs.docker_run_args }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          bash -s -- \
-          "${{ inputs.image_archive }}" \
-          "${{ inputs.container_name }}" \
-          "${{ inputs.docker_run_args }}" << 'EOF'
+          "IMAGE_ARCHIVE='$IMAGE_ARCHIVE' CONTAINER_NAME='$CONTAINER_NAME' DOCKER_RUN_ARGS='$DOCKER_RUN_ARGS' bash -s" << 'EOF'
           set -euo pipefail
-
-          IMAGE_ARCHIVE="$1"
-          CONTAINER_NAME="$2"
-          DOCKER_RUN_ARGS="$3"
 
           echo "🚀 Starting Docker deployment process..."
 
