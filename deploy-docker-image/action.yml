@@ -48,6 +48,11 @@ runs:
     - name: Transfer Docker Image to VPS
       shell: bash
       run: |
+        echo "📁 Creating docker-images directory on VPS..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" -o StrictHostKeyChecking=no \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "mkdir -p ~/docker-images"
+
         echo "📦 Transferring Docker image to VPS..."
         scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no \
           "${{ inputs.image_archive }}" \
