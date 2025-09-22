@@ -33,10 +33,6 @@ inputs:
     description: "Timeout in seconds for health check"
     required: false
     default: "60"
-  package_auth_token:
-    description: "GitHub personal access token for private package access (e.g., ghp_xxxxx)"
-    required: false
-    default: ""
 
 runs:
   using: "composite"
@@ -66,31 +62,18 @@ runs:
           bash -s -- \
           "${{ inputs.image_archive }}" \
           "${{ inputs.container_name }}" \
-          "${{ inputs.docker_run_args }}" \
-          "${{ inputs.package_auth_token }}" << 'EOF'
+          "${{ inputs.docker_run_args }}" << 'EOF'
           set -euo pipefail
 
           IMAGE_ARCHIVE="$1"
           CONTAINER_NAME="$2"
           DOCKER_RUN_ARGS="$3"
-          PACKAGE_AUTH_TOKEN="$4"
 
           echo "🚀 Starting Docker deployment process..."
 
           # Ensure docker-images directory exists
           mkdir -p ~/docker-images
           cd ~/docker-images
-
-          # Create .npmrc file if package_auth_token is provided
-          if [ -n "$PACKAGE_AUTH_TOKEN" ]; then
-            echo "🔐 Setting up .npmrc for GitHub package authentication..."
-            cat > ~/.npmrc << NPMRC_EOF
-            @emtrade-team:registry=https://npm.pkg.github.com
-            //npm.pkg.github.com/:_authToken=$PACKAGE_AUTH_TOKEN
-            always-auth=true
-            NPMRC_EOF
-            echo "✅ .npmrc file created for GitHub packages"
-          fi
 
           # Extract image name from archive
           IMAGE_NAME=$(echo "$IMAGE_ARCHIVE" | sed 's/\.tar\.gz$//')
