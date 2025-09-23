@@ -120,9 +120,17 @@ runs:
 
           # Add pg_hba.conf entry for the microservice user (if user was created)
           if [ -z "$user_exists" ]; then
-            echo "🔐 Adding pg_hba.conf entry for microservice user..."
+            echo "🔐 Adding pg_hba.conf entries for microservice user..."
+
+            # Get the VPS IP address for pg_hba.conf entry
+            VPS_IP=$(hostname -I | awk '{print $1}')
+            echo "Detected VPS IP: $VPS_IP"
+
+            # Add entries for both localhost and VPS IP
             sudo docker exec "$CONTAINER" bash -c \
               "echo 'host all $DATABASE_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+            sudo docker exec "$CONTAINER" bash -c \
+              "echo 'host all $DATABASE_USER $VPS_IP/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
 
             echo "🔄 Reloading PostgreSQL configuration..."
             sudo docker restart "$CONTAINER"
@@ -138,7 +146,35 @@ runs:
               sleep 2
             done
           else
-            echo "🔐 User already exists - pg_hba.conf entry should already be configured"
+            echo "🔐 User already exists - checking if pg_hba.conf needs updating..."
+
+            # Check if user has pg_hba.conf entry, add if missing
+            if ! sudo docker exec "$CONTAINER" grep -q "^host.*$DATABASE_USER" /var/lib/postgresql/data/pg_hba.conf; then
+              echo "🔐 Adding missing pg_hba.conf entries..."
+              VPS_IP=$(hostname -I | awk '{print $1}')
+              echo "Detected VPS IP: $VPS_IP"
+
+              sudo docker exec "$CONTAINER" bash -c \
+                "echo 'host all $DATABASE_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+              sudo docker exec "$CONTAINER" bash -c \
+                "echo 'host all $DATABASE_USER $VPS_IP/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+
+              echo "🔄 Reloading PostgreSQL configuration..."
+              sudo docker restart "$CONTAINER"
+
+              # Wait for PostgreSQL to be ready after restart
+              echo "⏳ Waiting for PostgreSQL to be ready after restart..."
+              for i in $(seq 1 30); do
+                if sudo docker exec "$CONTAINER" pg_isready -U "$POSTGRES_ADMIN_USER" -d postgres -h 127.0.0.1 >/dev/null 2>&1; then
+                  echo "✅ PostgreSQL is ready after restart."
+                  break
+                fi
+                echo "🔄 Waiting for restart... ($i/30)"
+                sleep 2
+              done
+            else
+              echo "✅ pg_hba.conf entries already exist for user"
+            fi
           fi
 
           echo "✅ Database setup completed successfully!"
