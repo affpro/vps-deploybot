@@ -120,6 +120,13 @@ runs:
               exit 1
             fi
             echo "🔄 Waiting for container... ($i/60) Status: $container_status"
+
+            # Show logs if container is restarting frequently
+            if [ "$container_status" = "restarting" ] && [ $((i % 10)) -eq 0 ]; then
+              echo "🔍 Container restarting frequently, showing recent logs:"
+              sudo docker logs --tail=20 "$CONTAINER_NAME" || true
+            fi
+
             sleep 2
           done
 
@@ -129,7 +136,11 @@ runs:
 
           # Show recent logs (including migration output)
           echo "📝 Container startup logs (including migrations):"
-          sudo docker logs --tail=50 "$CONTAINER_NAME" || true
+          sudo docker logs --tail=100 "$CONTAINER_NAME" || true
+
+          # Stream logs for 30 seconds to show real-time output
+          echo "📡 Streaming container logs for 30 seconds..."
+          timeout 30 sudo docker logs -f "$CONTAINER_NAME" 2>/dev/null || echo "Log streaming completed"
 
           # Clean up the archive file
           rm -f "$IMAGE_ARCHIVE"
