@@ -144,13 +144,33 @@ runs:
           CONTAINER=postgres_container
 
           echo "🔌 Testing connection as microservice user..."
-          if sudo docker exec -e PGPASSWORD="$DATABASE_PASS" "$CONTAINER" \
+          echo "Attempting to connect to database '$DATABASE_NAME' as user '$DATABASE_USER'..."
+
+          # Test with verbose output for debugging
+          connection_result=$(sudo docker exec -e PGPASSWORD="$DATABASE_PASS" "$CONTAINER" \
             psql -U "$DATABASE_USER" -h 127.0.0.1 -d "$DATABASE_NAME" \
-            -c "SELECT current_database(), current_user, version();" >/dev/null 2>&1; then
-            echo "✅ Database connection test successful!"
-            echo "🎉 Microservice database is ready for use!"
-          else
+            -c "SELECT current_database(), current_user, now();" 2>&1 || echo "CONNECTION_FAILED")
+
+          if echo "$connection_result" | grep -q "CONNECTION_FAILED"; then
             echo "❌ Database connection test failed!"
+            echo "🔍 Error details:"
+            echo "$connection_result"
+
+            echo "🔍 Checking user permissions..."
+            sudo docker exec -e PGPASSWORD="$DATABASE_PASS" "$CONTAINER" \
+              psql -U "$DATABASE_USER" -h 127.0.0.1 -d postgres \
+              -c "SELECT rolname, rolcanlogin FROM pg_roles WHERE rolname='$DATABASE_USER';" || true
+
+            echo "🔍 Checking database ownership..."
+            sudo docker exec -e PGPASSWORD="$DATABASE_PASS" "$CONTAINER" \
+              psql -U "$DATABASE_USER" -h 127.0.0.1 -d postgres \
+              -c "SELECT datname, datdba FROM pg_database WHERE datname='$DATABASE_NAME';" || true
+
             exit 1
+          else
+            echo "✅ Database connection test successful!"
+            echo "📋 Connection result:"
+            echo "$connection_result"
+            echo "🎉 Microservice database is ready for use!"
           fi
         EOF
