@@ -1,0 +1,156 @@
+name: Setup Microservice PostgreSQL Database
+description: "Create dedicated database and user for microservice with proper permissions. Requires existing PostgreSQL container and SSH setup."
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  postgres_admin_user:
+    description: "PostgreSQL admin username"
+    required: true
+  postgres_admin_pass:
+    description: "PostgreSQL admin password"
+    required: true
+  database_name:
+    description: "Name of the database to create for the microservice"
+    required: true
+  database_user:
+    description: "Username for the microservice database user"
+    required: true
+  database_password:
+    description: "Password for the microservice database user"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create Microservice Database and User
+      shell: bash
+      env:
+        POSTGRES_ADMIN_USER: "${{ inputs.postgres_admin_user }}"
+        POSTGRES_ADMIN_PASS: "${{ inputs.postgres_admin_pass }}"
+        DATABASE_NAME: "${{ inputs.database_name }}"
+        DATABASE_USER: "${{ inputs.database_user }}"
+        DATABASE_PASS: "${{ inputs.database_password }}"
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "POSTGRES_ADMIN_USER='$POSTGRES_ADMIN_USER' POSTGRES_ADMIN_PASS='$POSTGRES_ADMIN_PASS' DATABASE_NAME='$DATABASE_NAME' DATABASE_USER='$DATABASE_USER' DATABASE_PASS='$DATABASE_PASS' bash -s" << 'EOF'
+          set -euo pipefail
+
+          CONTAINER=postgres_container
+
+          echo "🔍 Checking PostgreSQL container status..."
+          if ! sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+            echo "❌ PostgreSQL container is not running. Please run setup-vps-docker-postgres first."
+            exit 1
+          fi
+
+          echo "🗄️ Checking database and user for microservice..."
+          echo "Database: $DATABASE_NAME"
+          echo "User: $DATABASE_USER"
+
+          # Check if database exists
+          db_exists=$(sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+            psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres \
+            -tAc "SELECT 1 FROM pg_database WHERE datname='$DATABASE_NAME';" || echo "")
+
+          # Check if user exists
+          user_exists=$(sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+            psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres \
+            -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DATABASE_USER';" || echo "")
+
+          # Skip if both exist
+          if [ -n "$db_exists" ] && [ -n "$user_exists" ]; then
+            echo "✅ Database '$DATABASE_NAME' and user '$DATABASE_USER' already exist - skipping creation"
+            echo "📋 Existing setup:"
+            echo "   Database: $DATABASE_NAME"
+            echo "   Username: $DATABASE_USER"
+            echo "   Host: localhost (or VPS IP for remote)"
+            echo "   Port: 5432"
+            exit 0
+          fi
+
+          # Create user if it doesn't exist
+          if [ -z "$user_exists" ]; then
+            echo "👤 Creating database user: $DATABASE_USER"
+            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+              psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres \
+              -c "CREATE USER \"$DATABASE_USER\" WITH PASSWORD '$DATABASE_PASS';"
+          else
+            echo "👤 User $DATABASE_USER already exists - skipping user creation"
+          fi
+
+          # Create database if it doesn't exist
+          if [ -z "$db_exists" ]; then
+            echo "🗄️ Creating database: $DATABASE_NAME"
+            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+              psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres \
+              -c "CREATE DATABASE \"$DATABASE_NAME\" OWNER \"$DATABASE_USER\";"
+
+            # Grant necessary privileges only for new database
+            echo "🔐 Setting up database permissions..."
+            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+              psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d postgres \
+              -c "GRANT ALL PRIVILEGES ON DATABASE \"$DATABASE_NAME\" TO \"$DATABASE_USER\";"
+
+            # Connect to the new database and grant schema permissions
+            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+              psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d "$DATABASE_NAME" \
+              -c "GRANT ALL ON SCHEMA public TO \"$DATABASE_USER\";"
+
+            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+              psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d "$DATABASE_NAME" \
+              -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DATABASE_USER\";"
+
+            sudo docker exec -e PGPASSWORD="$POSTGRES_ADMIN_PASS" "$CONTAINER" \
+              psql -U "$POSTGRES_ADMIN_USER" -h 127.0.0.1 -d "$DATABASE_NAME" \
+              -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DATABASE_USER\";"
+          else
+            echo "🗄️ Database $DATABASE_NAME already exists - skipping database creation"
+          fi
+
+          echo "✅ Database setup completed successfully!"
+          echo "📋 Connection details:"
+          echo "   Database: $DATABASE_NAME"
+          echo "   Username: $DATABASE_USER"
+          echo "   Host: localhost (or VPS IP for remote)"
+          echo "   Port: 5432"
+
+        EOF
+
+    - name: Test Database Connection
+      shell: bash
+      env:
+        DATABASE_NAME: "${{ inputs.database_name }}"
+        DATABASE_USER: "${{ inputs.database_user }}"
+        DATABASE_PASS: "${{ inputs.database_password }}"
+      run: |
+        echo "🧪 Testing database connection..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "DATABASE_NAME='$DATABASE_NAME' DATABASE_USER='$DATABASE_USER' DATABASE_PASS='$DATABASE_PASS' bash -s" << 'EOF'
+          set -euo pipefail
+
+          CONTAINER=postgres_container
+
+          echo "🔌 Testing connection as microservice user..."
+          if sudo docker exec -e PGPASSWORD="$DATABASE_PASS" "$CONTAINER" \
+            psql -U "$DATABASE_USER" -h 127.0.0.1 -d "$DATABASE_NAME" \
+            -c "SELECT current_database(), current_user, version();" >/dev/null 2>&1; then
+            echo "✅ Database connection test successful!"
+            echo "🎉 Microservice database is ready for use!"
+          else
+            echo "❌ Database connection test failed!"
+            exit 1
+          fi
+        EOF
