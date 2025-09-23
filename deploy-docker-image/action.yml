@@ -26,9 +26,8 @@ inputs:
     required: false
     default: ""
   container_command:
-    description: "Custom command to run in the container (e.g., '/bin/sh -c \"yarn cli migration:run && node ./dist/server.js\"')"
-    required: false
-    default: ""
+    description: "Command to run in the container (e.g., 'node ./dist/server.js' or '/bin/sh -c \"yarn cli migration:run && node ./dist/server.js\"')"
+    required: true
   health_check_url:
     description: "URL to check container health after deployment (optional)"
     required: false
@@ -105,12 +104,8 @@ runs:
           # Run new container
           echo "🔄 Starting new container: $CONTAINER_NAME"
           echo "Using docker run args: $DOCKER_RUN_ARGS"
-          if [ -n "$CONTAINER_COMMAND" ]; then
-            echo "Using custom command: $CONTAINER_COMMAND"
-            sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" $CONTAINER_COMMAND
-          else
-            sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest"
-          fi
+          echo "Using container command: $CONTAINER_COMMAND"
+          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$CONTAINER_COMMAND"
 
           # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
