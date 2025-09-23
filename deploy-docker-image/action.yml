@@ -25,6 +25,10 @@ inputs:
     description: "Additional arguments for docker run command (ports, env vars, volumes, etc.)"
     required: false
     default: ""
+  container_command:
+    description: "Custom command to run in the container (e.g., '/bin/sh -c \"yarn cli migration:run && node ./dist/server.js\"')"
+    required: false
+    default: ""
   health_check_url:
     description: "URL to check container health after deployment (optional)"
     required: false
@@ -64,11 +68,12 @@ runs:
         IMAGE_ARCHIVE: "${{ inputs.image_archive }}"
         CONTAINER_NAME: "${{ inputs.container_name }}"
         DOCKER_RUN_ARGS: "${{ inputs.docker_run_args }}"
+        CONTAINER_COMMAND: "${{ inputs.container_command }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "IMAGE_ARCHIVE='$IMAGE_ARCHIVE' CONTAINER_NAME='$CONTAINER_NAME' DOCKER_RUN_ARGS='$DOCKER_RUN_ARGS' bash -s" << 'EOF'
+          "IMAGE_ARCHIVE='$IMAGE_ARCHIVE' CONTAINER_NAME='$CONTAINER_NAME' DOCKER_RUN_ARGS='$DOCKER_RUN_ARGS' CONTAINER_COMMAND='$CONTAINER_COMMAND' bash -s" << 'EOF'
           set -euo pipefail
 
           echo "🚀 Starting Docker deployment process..."
@@ -100,16 +105,26 @@ runs:
           # Run new container
           echo "🔄 Starting new container: $CONTAINER_NAME"
           echo "Using docker run args: $DOCKER_RUN_ARGS"
-          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest"
+          if [ -n "$CONTAINER_COMMAND" ]; then
+            echo "Using custom command: $CONTAINER_COMMAND"
+            sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" $CONTAINER_COMMAND
+          else
+            sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest"
+          fi
 
-          # Verify container is running
+          # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
-          for i in $(seq 1 30); do
-            if sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+          for i in $(seq 1 60); do
+            container_status=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "none")
+            if [ "$container_status" = "running" ]; then
               echo "✅ Container $CONTAINER_NAME is running"
               break
+            elif [ "$container_status" = "exited" ]; then
+              echo "❌ Container exited unexpectedly. Logs:"
+              sudo docker logs --tail=50 "$CONTAINER_NAME" || true
+              exit 1
             fi
-            echo "🔄 Waiting for container... ($i/30)"
+            echo "🔄 Waiting for container... ($i/60) Status: $container_status"
             sleep 2
           done
 
@@ -117,9 +132,9 @@ runs:
           echo "📊 Container status:"
           sudo docker ps --filter "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-          # Show recent logs
-          echo "📝 Recent container logs:"
-          sudo docker logs --tail=20 "$CONTAINER_NAME" || true
+          # Show recent logs (including migration output)
+          echo "📝 Container startup logs (including migrations):"
+          sudo docker logs --tail=50 "$CONTAINER_NAME" || true
 
           # Clean up the archive file
           rm -f "$IMAGE_ARCHIVE"
@@ -131,23 +146,39 @@ runs:
       shell: bash
       if: ${{ inputs.health_check_url != '' }}
       run: |
-        echo "🏥 Performing health check..."
+        echo "🏥 Performing health check on service endpoint..."
         HEALTH_URL="${{ inputs.health_check_url }}"
         TIMEOUT="${{ inputs.health_check_timeout }}"
+        CONTAINER_NAME="${{ inputs.container_name }}"
+
+        echo "🔍 Waiting for service to complete migrations and start..."
+        sleep 10  # Give time for migrations to complete
 
         for i in $(seq 1 $TIMEOUT); do
-          if curl -f -s "$HEALTH_URL" >/dev/null 2>&1; then
+          echo "🔄 Health check attempt $i/$TIMEOUT on $HEALTH_URL"
+
+          # Try to get a response with more details
+          response=$(curl -f -s -w "HTTP_CODE:%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "FAILED")
+
+          if echo "$response" | grep -q "HTTP_CODE:200"; then
             echo "✅ Health check passed: $HEALTH_URL"
+            echo "📋 Service response: $(echo "$response" | sed 's/HTTP_CODE:200//')"
+            echo "🎉 Service is healthy and ready!"
             exit 0
+          elif echo "$response" | grep -q "HTTP_CODE:"; then
+            http_code=$(echo "$response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+            echo "⚠️ Service responding but with HTTP $http_code"
+          else
+            echo "❌ No response from service"
           fi
-          echo "🔄 Health check attempt $i/$TIMEOUT..."
-          sleep 1
+
+          sleep 2
         done
 
-        echo "❌ Health check failed after $TIMEOUT seconds"
-        echo "🔍 Checking container logs for issues:"
+        echo "❌ Health check failed after $TIMEOUT attempts"
+        echo "🔍 Final container status and logs:"
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "sudo docker logs --tail=50 ${{ inputs.container_name }}"
+          "echo 'Container status:' && sudo docker ps --filter name=$CONTAINER_NAME && echo 'Recent logs:' && sudo docker logs --tail=100 $CONTAINER_NAME"
         exit 1
