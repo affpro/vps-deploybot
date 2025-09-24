@@ -135,24 +135,29 @@ runs:
             done
           fi
 
-          # Test with absolute minimal command first
-          SIMPLE_TEST="echo 'SIMPLE_TEST_WORKS' && sleep 5 && echo 'STILL_WORKING' && sleep 1000"
-          echo "🧪 Testing with simple command first: $SIMPLE_TEST"
+          # Test with NO custom command - use default Dockerfile CMD
+          echo "🧪 Testing with NO custom command (default Dockerfile CMD)..."
+          sudo docker run -d --name "${CONTAINER_NAME}_default" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest"
 
-          sudo docker run -d --name "${CONTAINER_NAME}_test" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$SIMPLE_TEST"
-
-          echo "⏳ Waiting 10 seconds then checking test container..."
+          echo "⏳ Waiting 10 seconds then checking default container..."
           sleep 10
 
-          echo "📋 Test container logs:"
-          sudo docker logs "${CONTAINER_NAME}_test" || true
+          echo "📋 Default container logs:"
+          sudo docker logs "${CONTAINER_NAME}_default" || true
 
-          echo "📊 Test container status:"
-          sudo docker ps -a --filter "name=${CONTAINER_NAME}_test" --format "table {{.Names}}\t{{.Status}}"
+          echo "📊 Default container status:"
+          sudo docker ps -a --filter "name=${CONTAINER_NAME}_default" --format "table {{.Names}}\t{{.Status}}"
 
-          echo "🧹 Cleaning up test container..."
-          sudo docker stop "${CONTAINER_NAME}_test" || true
-          sudo docker rm "${CONTAINER_NAME}_test" || true
+          echo "🧹 Cleaning up default test container..."
+          sudo docker stop "${CONTAINER_NAME}_default" || true
+          sudo docker rm "${CONTAINER_NAME}_default" || true
+
+          # Also test Docker logging system
+          echo "🔍 Testing Docker logging system..."
+          echo "Docker version:"
+          sudo docker version --format '{{.Server.Version}}' || true
+          echo "Docker info (logging driver):"
+          sudo docker system info | grep -i logging || true
 
           # Now try the real command
           FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
