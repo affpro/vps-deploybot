@@ -125,12 +125,13 @@ runs:
           STARTUP_SCRIPT=""
           if [ -n "$STARTUP_COMMANDS" ]; then
             echo "📋 Startup commands:"
-            echo "$STARTUP_COMMANDS" | while IFS= read -r cmd; do
+            # Use process substitution to avoid subshell
+            while IFS= read -r cmd; do
               if [ -n "$cmd" ]; then
                 echo "  → $cmd"
                 STARTUP_SCRIPT="$STARTUP_SCRIPT$cmd && "
               fi
-            done
+            done <<< "$STARTUP_COMMANDS"
           fi
 
           FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
