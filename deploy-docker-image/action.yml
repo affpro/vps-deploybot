@@ -136,6 +136,7 @@ runs:
           fi
 
           # Force output and debugging
+          FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
           DEBUG_COMMAND="exec > >(tee -a /tmp/container.log) 2>&1; echo 'CONTAINER_DEBUG: Starting execution'; $STARTUP_SCRIPT echo 'CONTAINER_DEBUG: About to start main command'; $MAIN_COMMAND"
           echo "🚀 Full command: $FULL_COMMAND"
           echo "🔍 Debug command: $DEBUG_COMMAND"
