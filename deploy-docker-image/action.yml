@@ -135,13 +135,30 @@ runs:
             done
           fi
 
-          # Force output and debugging
-          FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
-          DEBUG_COMMAND="exec > >(tee -a /tmp/container.log) 2>&1; echo 'CONTAINER_DEBUG: Starting execution'; $STARTUP_SCRIPT echo 'CONTAINER_DEBUG: About to start main command' && $MAIN_COMMAND"
-          echo "🚀 Full command: $FULL_COMMAND"
-          echo "🔍 Debug command: $DEBUG_COMMAND"
+          # Test with absolute minimal command first
+          SIMPLE_TEST="echo 'SIMPLE_TEST_WORKS' && sleep 5 && echo 'STILL_WORKING' && sleep 1000"
+          echo "🧪 Testing with simple command first: $SIMPLE_TEST"
 
-          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$DEBUG_COMMAND"
+          sudo docker run -d --name "${CONTAINER_NAME}_test" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$SIMPLE_TEST"
+
+          echo "⏳ Waiting 10 seconds then checking test container..."
+          sleep 10
+
+          echo "📋 Test container logs:"
+          sudo docker logs "${CONTAINER_NAME}_test" || true
+
+          echo "📊 Test container status:"
+          sudo docker ps -a --filter "name=${CONTAINER_NAME}_test" --format "table {{.Names}}\t{{.Status}}"
+
+          echo "🧹 Cleaning up test container..."
+          sudo docker stop "${CONTAINER_NAME}_test" || true
+          sudo docker rm "${CONTAINER_NAME}_test" || true
+
+          # Now try the real command
+          FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
+          echo "🚀 Full command: $FULL_COMMAND"
+
+          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
 
           # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
