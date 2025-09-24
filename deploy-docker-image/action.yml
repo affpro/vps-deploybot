@@ -25,8 +25,12 @@ inputs:
     description: "Additional arguments for docker run command (ports, env vars, volumes, etc.)"
     required: false
     default: ""
-  container_command:
-    description: "Command to run in the container (e.g., 'node ./dist/server.js' or '/bin/sh -c \"yarn cli migration:run && node ./dist/server.js\"')"
+  startup_commands:
+    description: "Startup commands to run before main command (one per line, e.g. migration commands)"
+    required: false
+    default: ""
+  main_command:
+    description: "Main command to keep container running (e.g., 'node ./dist/server.js')"
     required: true
   health_check_url:
     description: "URL to check container health after deployment (optional)"
@@ -67,12 +71,13 @@ runs:
         IMAGE_ARCHIVE: "${{ inputs.image_archive }}"
         CONTAINER_NAME: "${{ inputs.container_name }}"
         DOCKER_RUN_ARGS: "${{ inputs.docker_run_args }}"
-        CONTAINER_COMMAND: "${{ inputs.container_command }}"
+        STARTUP_COMMANDS: "${{ inputs.startup_commands }}"
+        MAIN_COMMAND: "${{ inputs.main_command }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "IMAGE_ARCHIVE='$IMAGE_ARCHIVE' CONTAINER_NAME='$CONTAINER_NAME' DOCKER_RUN_ARGS='$DOCKER_RUN_ARGS' CONTAINER_COMMAND='$CONTAINER_COMMAND' bash -s" << 'EOF'
+          "IMAGE_ARCHIVE='$IMAGE_ARCHIVE' CONTAINER_NAME='$CONTAINER_NAME' DOCKER_RUN_ARGS='$DOCKER_RUN_ARGS' STARTUP_COMMANDS='$STARTUP_COMMANDS' MAIN_COMMAND='$MAIN_COMMAND' bash -s" << 'EOF'
           set -euo pipefail
 
           echo "🚀 Starting Docker deployment process..."
@@ -112,11 +117,26 @@ runs:
           echo "File listing:"
           sudo docker run --rm "$IMAGE_NAME:latest" ls -la || echo "LS failed"
 
-          # Run new container
+          # Build container command
           echo "🔄 Starting new container: $CONTAINER_NAME"
           echo "Using docker run args: $DOCKER_RUN_ARGS"
-          echo "Using container command: $CONTAINER_COMMAND"
-          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" $CONTAINER_COMMAND
+
+          # Build startup script
+          STARTUP_SCRIPT=""
+          if [ -n "$STARTUP_COMMANDS" ]; then
+            echo "📋 Startup commands:"
+            echo "$STARTUP_COMMANDS" | while IFS= read -r cmd; do
+              if [ -n "$cmd" ]; then
+                echo "  → $cmd"
+                STARTUP_SCRIPT="$STARTUP_SCRIPT$cmd && "
+              fi
+            done
+          fi
+
+          FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
+          echo "🚀 Full command: $FULL_COMMAND"
+
+          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
 
           # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
