@@ -101,6 +101,17 @@ runs:
             tail -n +2 | head -n -1 | awk '{print $1}' | \
             xargs -r sudo docker rmi || true
 
+          # Debug: Test image first
+          echo "🔍 Testing image before running container..."
+          echo "Image inspection:"
+          sudo docker run --rm "$IMAGE_NAME:latest" echo "Image test successful" || echo "Image test failed"
+          echo "Shell test:"
+          sudo docker run --rm "$IMAGE_NAME:latest" /bin/sh -c "echo Shell works" || echo "Shell test failed"
+          echo "Working directory:"
+          sudo docker run --rm "$IMAGE_NAME:latest" pwd || echo "PWD failed"
+          echo "File listing:"
+          sudo docker run --rm "$IMAGE_NAME:latest" ls -la || echo "LS failed"
+
           # Run new container
           echo "🔄 Starting new container: $CONTAINER_NAME"
           echo "Using docker run args: $DOCKER_RUN_ARGS"
