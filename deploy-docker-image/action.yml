@@ -26,9 +26,9 @@ inputs:
     required: false
     default: ""
   startup_commands:
-    description: "Startup commands to run before main command (one per line, e.g. migration commands)"
+    description: "Startup commands as JSON array (e.g., '[\"echo Starting...\", \"yarn cli:prod migration:run\"]')"
     required: false
-    default: ""
+    default: "[]"
   main_command:
     description: "Main command to keep container running (e.g., 'node ./dist/server.js')"
     required: true
@@ -121,17 +121,18 @@ runs:
           echo "🔄 Starting new container: $CONTAINER_NAME"
           echo "Using docker run args: $DOCKER_RUN_ARGS"
 
-          # Build startup script
+          # Build startup script from JSON array
           STARTUP_SCRIPT=""
-          if [ -n "$STARTUP_COMMANDS" ]; then
+          if [ "$STARTUP_COMMANDS" != "[]" ] && [ -n "$STARTUP_COMMANDS" ]; then
             echo "📋 Startup commands:"
-            # Use process substitution to avoid subshell
-            while IFS= read -r cmd; do
-              if [ -n "$cmd" ]; then
-                echo "  → $cmd"
-                STARTUP_SCRIPT="$STARTUP_SCRIPT$cmd && "
-              fi
-            done <<< "$STARTUP_COMMANDS"
+            # Parse JSON array into bash array
+            readarray -t STARTUP_COMMANDS_ARRAY < <(echo "$STARTUP_COMMANDS" | jq -r '.[]')
+
+            # Build startup script
+            for cmd in "${STARTUP_COMMANDS_ARRAY[@]}"; do
+              echo "  → $cmd"
+              STARTUP_SCRIPT="$STARTUP_SCRIPT$cmd && "
+            done
           fi
 
           FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
