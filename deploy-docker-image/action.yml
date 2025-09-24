@@ -135,31 +135,7 @@ runs:
             done
           fi
 
-          # Test with NO custom command - use default Dockerfile CMD
-          echo "🧪 Testing with NO custom command (default Dockerfile CMD)..."
-          sudo docker run -d --name "${CONTAINER_NAME}_default" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest"
-
-          echo "⏳ Waiting 10 seconds then checking default container..."
-          sleep 10
-
-          echo "📋 Default container logs:"
-          sudo docker logs "${CONTAINER_NAME}_default" || true
-
-          echo "📊 Default container status:"
-          sudo docker ps -a --filter "name=${CONTAINER_NAME}_default" --format "table {{.Names}}\t{{.Status}}"
-
-          echo "🧹 Cleaning up default test container..."
-          sudo docker stop "${CONTAINER_NAME}_default" || true
-          sudo docker rm "${CONTAINER_NAME}_default" || true
-
-          # Also test Docker logging system
-          echo "🔍 Testing Docker logging system..."
-          echo "Docker version:"
-          sudo docker version --format '{{.Server.Version}}' || true
-          echo "Docker info (logging driver):"
-          sudo docker system info | grep -i logging || true
-
-          # Now try the real command
+          # Run new container with startup commands
           FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
           echo "🚀 Full command: $FULL_COMMAND"
 
@@ -194,19 +170,11 @@ runs:
 
           # Show recent logs (including migration output)
           echo "📝 Container startup logs (including migrations):"
-          sudo docker logs --tail=100 "$CONTAINER_NAME" || true
-
-          # Check internal log file
-          echo "📋 Container internal logs:"
-          sudo docker exec "$CONTAINER_NAME" cat /tmp/container.log 2>/dev/null || echo "No internal log file found"
+          sudo docker logs --tail=50 "$CONTAINER_NAME" || true
 
           # Stream logs for 30 seconds to show real-time output
           echo "📡 Streaming container logs for 30 seconds..."
           timeout 30 sudo docker logs -f "$CONTAINER_NAME" 2>/dev/null || echo "Log streaming completed"
-
-          # Final check of internal logs
-          echo "📋 Final container internal logs:"
-          sudo docker exec "$CONTAINER_NAME" cat /tmp/container.log 2>/dev/null || echo "No internal log file found"
 
           # Clean up the archive file
           rm -f "$IMAGE_ARCHIVE"
