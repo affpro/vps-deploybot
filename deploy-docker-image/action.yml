@@ -135,10 +135,12 @@ runs:
             done
           fi
 
-          FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
+          # Force output and debugging
+          DEBUG_COMMAND="exec > >(tee -a /tmp/container.log) 2>&1; echo 'CONTAINER_DEBUG: Starting execution'; $STARTUP_SCRIPT echo 'CONTAINER_DEBUG: About to start main command'; $MAIN_COMMAND"
           echo "🚀 Full command: $FULL_COMMAND"
+          echo "🔍 Debug command: $DEBUG_COMMAND"
 
-          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$DEBUG_COMMAND"
 
           # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
@@ -171,9 +173,17 @@ runs:
           echo "📝 Container startup logs (including migrations):"
           sudo docker logs --tail=100 "$CONTAINER_NAME" || true
 
+          # Check internal log file
+          echo "📋 Container internal logs:"
+          sudo docker exec "$CONTAINER_NAME" cat /tmp/container.log 2>/dev/null || echo "No internal log file found"
+
           # Stream logs for 30 seconds to show real-time output
           echo "📡 Streaming container logs for 30 seconds..."
           timeout 30 sudo docker logs -f "$CONTAINER_NAME" 2>/dev/null || echo "Log streaming completed"
+
+          # Final check of internal logs
+          echo "📋 Final container internal logs:"
+          sudo docker exec "$CONTAINER_NAME" cat /tmp/container.log 2>/dev/null || echo "No internal log file found"
 
           # Clean up the archive file
           rm -f "$IMAGE_ARCHIVE"
