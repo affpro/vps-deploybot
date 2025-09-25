@@ -52,6 +52,16 @@ runs:
 
             CONTAINER=postgres_container
             IMAGE=postgres:16
+            NETWORK_NAME=database-network
+
+            # Create database network for reliable hostname resolution
+            echo "🌐 Creating database network..."
+            if ! sudo docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+              sudo docker network create "${NETWORK_NAME}"
+              echo "✅ Created '${NETWORK_NAME}' network"
+            else
+              echo "✅ '${NETWORK_NAME}' network already exists"
+            fi
 
 
             echo "🔎 Ensuring PostgreSQL container..."
@@ -69,7 +79,7 @@ runs:
               sudo docker pull "$IMAGE"
               sudo docker run -d \
                 --name "$CONTAINER" \
-                --network bridge \
+                --network "${NETWORK_NAME}" \
                 -e POSTGRES_USER="$POSTGRES_ADMIN_USER" \
                 -e POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASS" \
                 -e POSTGRES_DB=postgres \

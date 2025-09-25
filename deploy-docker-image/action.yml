@@ -139,11 +139,18 @@ runs:
           FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
           echo "🚀 Full command: $FULL_COMMAND"
 
-          # Use default bridge network (same as PostgreSQL)
-          echo "🌐 Using default bridge network for container communication..."
+          # Use database network for reliable container communication
+          NETWORK_NAME="database-network"
+          echo "🌐 Using ${NETWORK_NAME} for container communication..."
 
-
-          sudo docker run -d --name "$CONTAINER_NAME" --network bridge $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          # Check if database network exists
+          if sudo docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+            echo "✅ Using ${NETWORK_NAME} network"
+            sudo docker run -d --name "$CONTAINER_NAME" --network "${NETWORK_NAME}" -p 3100:3100 $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          else
+            echo "⚠️ ${NETWORK_NAME} not found, using bridge network"
+            sudo docker run -d --name "$CONTAINER_NAME" --network bridge $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          fi
 
           # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
