@@ -52,16 +52,7 @@ runs:
 
             CONTAINER=postgres_container
             IMAGE=postgres:16
-            NETWORK_NAME=database-network
-
-            # Create database network for reliable hostname resolution
-            echo "🌐 Creating database network..."
-            if ! sudo docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
-              sudo docker network create "${NETWORK_NAME}"
-              echo "✅ Created '${NETWORK_NAME}' network"
-            else
-              echo "✅ '${NETWORK_NAME}' network already exists"
-            fi
+            POSTGRES_IP=172.17.0.10
 
 
             echo "🔎 Ensuring PostgreSQL container..."
@@ -79,7 +70,8 @@ runs:
               sudo docker pull "$IMAGE"
               sudo docker run -d \
                 --name "$CONTAINER" \
-                --network "${NETWORK_NAME}" \
+                --network bridge \
+                --ip "$POSTGRES_IP" \
                 -e POSTGRES_USER="$POSTGRES_ADMIN_USER" \
                 -e POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASS" \
                 -e POSTGRES_DB=postgres \
@@ -116,34 +108,8 @@ runs:
               echo "ℹ️ No allowed IPs specified - PostgreSQL accessible locally only"
             fi
 
-            # Add Docker bridge network range to pg_hba.conf for container communication
-            echo "🐳 Adding Docker bridge network access to pg_hba.conf..."
-            DOCKER_NETWORK_RANGE="172.17.0.0/16"
-
-            # Check if docker network range entry exists
-            if ! sudo docker exec "$CONTAINER" grep -q "host all all $DOCKER_NETWORK_RANGE md5" /var/lib/postgresql/data/pg_hba.conf 2>/dev/null; then
-              echo "➡ Adding Docker network range: $DOCKER_NETWORK_RANGE"
-              sudo docker exec "$CONTAINER" bash -c \
-                "echo 'host all all $DOCKER_NETWORK_RANGE md5' >> /var/lib/postgresql/data/pg_hba.conf"
-
-              echo "🔄 Restarting PostgreSQL to apply Docker network configuration..."
-              sudo docker restart "$CONTAINER"
-
-              # Wait for PostgreSQL to be ready after restart
-              echo "⏳ Waiting for PostgreSQL to be ready after restart..."
-              for i in $(seq 1 30); do
-                if sudo docker exec "$CONTAINER" pg_isready -U "$POSTGRES_ADMIN_USER" -d postgres -h 127.0.0.1 >/dev/null 2>&1; then
-                  echo "✅ PostgreSQL is ready after restart."
-                  break
-                fi
-                echo "🔄 Waiting for restart... ($i/30)"
-                sleep 2
-              done
-
-              echo "✅ Docker bridge network access configured"
-            else
-              echo "✅ Docker bridge network access already configured"
-            fi
+            echo "📍 PostgreSQL container assigned static IP: $POSTGRES_IP"
+            echo "💡 Use DB_HOST=$POSTGRES_IP in your applications for reliable connection"
         EOF
     - name: Check PostgreSQL Connection (robust)
       shell: bash
