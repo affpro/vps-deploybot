@@ -141,6 +141,15 @@ runs:
 
           # Use default bridge network (same as PostgreSQL)
           echo "🌐 Using default bridge network for container communication..."
+
+          # Verify postgres_container is accessible on bridge network
+          if sudo docker network inspect bridge --format '{{range .Containers}}{{.Name}}{{end}}' | grep -q "postgres_container"; then
+            echo "✅ postgres_container found on bridge network"
+          else
+            echo "⚠️ postgres_container not found on bridge network, connecting it..."
+            sudo docker network connect bridge postgres_container 2>/dev/null || echo "Already connected or failed"
+          fi
+
           sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
 
           # Verify container is running and monitor startup

@@ -77,7 +77,6 @@ runs:
               sudo docker pull "$IMAGE"
               sudo docker run -d \
                 --name "$CONTAINER" \
-                --network microservices \
                 -e POSTGRES_USER="$POSTGRES_ADMIN_USER" \
                 -e POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASS" \
                 -e POSTGRES_DB=postgres \
