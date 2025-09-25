@@ -51,11 +51,8 @@ jobs:
               echo "No volumes to remove."
             fi
 
-            echo "🧹 Removing all custom Docker networks..."
-            # Remove custom networks (keep default bridge, host, none)
-            sudo docker network ls --format '{{.Name}}' | grep -v '^bridge$\|^host$\|^none$' | while read network; do
-              [ -n "$network" ] && sudo docker network rm "$network" 2>/dev/null || echo "Failed to remove network: $network"
-            done
+            echo "🧹 Pruning unused Docker networks..."
+            sudo docker network prune -f || echo "Failed to prune networks"
 
             echo "🗑 Final system cleanup..."
             sudo docker system prune -af --volumes || echo "System prune failed"
