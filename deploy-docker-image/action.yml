@@ -139,7 +139,14 @@ runs:
           FULL_COMMAND="$STARTUP_SCRIPT$MAIN_COMMAND"
           echo "🚀 Full command: $FULL_COMMAND"
 
-          sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          # Connect to microservices network if it exists
+          if sudo docker network ls --format '{{.Name}}' | grep -q "^microservices$"; then
+            echo "🌐 Connecting to microservices network..."
+            sudo docker run -d --name "$CONTAINER_NAME" --network microservices $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          else
+            echo "⚠️ Microservices network not found, using default network"
+            sudo docker run -d --name "$CONTAINER_NAME" $DOCKER_RUN_ARGS "$IMAGE_NAME:latest" sh -c "$FULL_COMMAND"
+          fi
 
           # Verify container is running and monitor startup
           echo "⏳ Waiting for container to start..."
