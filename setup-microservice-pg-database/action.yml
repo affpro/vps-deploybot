@@ -88,6 +88,8 @@ runs:
                 "echo 'host all $DATABASE_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
               sudo docker exec "$CONTAINER" bash -c \
                 "echo 'host all $DATABASE_USER $VPS_IP/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+              sudo docker exec "$CONTAINER" bash -c \
+                "echo 'host all $DATABASE_USER 172.0.0.0/8 md5' >> /var/lib/postgresql/data/pg_hba.conf"
 
               echo "🔄 Reloading PostgreSQL configuration..."
               sudo docker restart "$CONTAINER"
@@ -156,11 +158,13 @@ runs:
             VPS_IP=$(hostname -I | awk '{print $1}')
             echo "Detected VPS IP: $VPS_IP"
 
-            # Add entries for both localhost and VPS IP
+            # Add entries for localhost, VPS IP, and Docker container networks
             sudo docker exec "$CONTAINER" bash -c \
               "echo 'host all $DATABASE_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
             sudo docker exec "$CONTAINER" bash -c \
               "echo 'host all $DATABASE_USER $VPS_IP/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+            sudo docker exec "$CONTAINER" bash -c \
+              "echo 'host all $DATABASE_USER 172.0.0.0/8 md5' >> /var/lib/postgresql/data/pg_hba.conf"
 
             echo "🔄 Reloading PostgreSQL configuration..."
             sudo docker restart "$CONTAINER"
