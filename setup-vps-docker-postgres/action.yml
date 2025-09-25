@@ -53,14 +53,6 @@ runs:
             CONTAINER=postgres_container
             IMAGE=postgres:16
 
-            # Create shared network for microservices
-            echo "🌐 Creating shared microservices network..."
-            if ! sudo docker network ls --format '{{.Name}}' | grep -q "^microservices$"; then
-              sudo docker network create microservices
-              echo "✅ Created 'microservices' network"
-            else
-              echo "✅ 'microservices' network already exists"
-            fi
 
             echo "🔎 Ensuring PostgreSQL container..."
             status=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "none")
