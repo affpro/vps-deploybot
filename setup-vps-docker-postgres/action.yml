@@ -52,7 +52,17 @@ runs:
 
             CONTAINER=postgres_container
             IMAGE=postgres:16
-            POSTGRES_IP=172.17.0.10
+            NETWORK_NAME=microservices
+            POSTGRES_IP=172.20.0.10
+
+            # Create custom network for static IP assignment
+            echo "🌐 Creating microservices network for static IP assignment..."
+            if ! sudo docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+              sudo docker network create --subnet=172.20.0.0/16 "${NETWORK_NAME}"
+              echo "✅ Created '${NETWORK_NAME}' network with subnet 172.20.0.0/16"
+            else
+              echo "✅ '${NETWORK_NAME}' network already exists"
+            fi
 
 
             echo "🔎 Ensuring PostgreSQL container..."
@@ -70,7 +80,7 @@ runs:
               sudo docker pull "$IMAGE"
               sudo docker run -d \
                 --name "$CONTAINER" \
-                --network bridge \
+                --network "${NETWORK_NAME}" \
                 --ip "$POSTGRES_IP" \
                 -e POSTGRES_USER="$POSTGRES_ADMIN_USER" \
                 -e POSTGRES_PASSWORD="$POSTGRES_ADMIN_PASS" \
@@ -108,7 +118,7 @@ runs:
               echo "ℹ️ No allowed IPs specified - PostgreSQL accessible locally only"
             fi
 
-            echo "📍 PostgreSQL container assigned static IP: $POSTGRES_IP"
+            echo "📍 PostgreSQL container assigned static IP: $POSTGRES_IP on network: $NETWORK_NAME"
             echo "💡 Use DB_HOST=$POSTGRES_IP in your applications for reliable connection"
         EOF
     - name: Check PostgreSQL Connection (robust)
