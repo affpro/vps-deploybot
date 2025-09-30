@@ -1,0 +1,302 @@
+name: Setup VPS Nginx Reverse Proxy
+description: "Install and configure nginx as a Docker container for reverse proxy and load balancing. Integrates with microservices network."
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  nginx_container_name:
+    description: "Name for the nginx container"
+    required: false
+    default: "nginx_proxy"
+  http_port:
+    description: "HTTP port to expose"
+    required: false
+    default: "80"
+  https_port:
+    description: "HTTPS port to expose"
+    required: false
+    default: "443"
+  default_server_name:
+    description: "Default server name for nginx (e.g., your domain)"
+    required: false
+    default: "_"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Nginx Container
+      shell: bash
+      env:
+        NGINX_CONTAINER: "${{ inputs.nginx_container_name }}"
+        HTTP_PORT: "${{ inputs.http_port }}"
+        HTTPS_PORT: "${{ inputs.https_port }}"
+        DEFAULT_SERVER: "${{ inputs.default_server_name }}"
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "NGINX_CONTAINER='$NGINX_CONTAINER' HTTP_PORT='$HTTP_PORT' HTTPS_PORT='$HTTPS_PORT' DEFAULT_SERVER='$DEFAULT_SERVER' bash -s" << 'EOF'
+          set -euo pipefail
+
+          echo "🌐 Setting up Nginx reverse proxy..."
+
+          NETWORK_NAME="microservices"
+          NGINX_CONFIG_DIR="/opt/nginx"
+          NGINX_SITES_DIR="$NGINX_CONFIG_DIR/sites-enabled"
+          NGINX_SSL_DIR="$NGINX_CONFIG_DIR/ssl"
+
+          # Check if microservices network exists
+          if ! sudo docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+            echo "❌ Microservices network not found. Please run setup-vps-docker-postgres first."
+            exit 1
+          fi
+
+          # Create nginx configuration directories on host
+          echo "📁 Creating nginx configuration directories..."
+          sudo mkdir -p "$NGINX_CONFIG_DIR" "$NGINX_SITES_DIR" "$NGINX_SSL_DIR"
+          sudo chmod 755 "$NGINX_CONFIG_DIR" "$NGINX_SITES_DIR" "$NGINX_SSL_DIR"
+
+          # Create main nginx.conf
+          echo "📝 Creating main nginx configuration..."
+          sudo tee "$NGINX_CONFIG_DIR/nginx.conf" > /dev/null << 'NGINX_CONF'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    # Logging format
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    # Basic settings
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 100m;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/json
+        application/javascript
+        application/xml+rss
+        application/atom+xml
+        image/svg+xml;
+
+    # Security headers (default)
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+
+    # Include server configurations
+    include /etc/nginx/sites-enabled/*;
+
+    # Default server (fallback)
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        location / {
+            return 444;  # Drop connection for unknown hosts
+        }
+
+        # Health check endpoint
+        location /nginx-health {
+            access_log off;
+            return 200 "nginx-ok\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}
+NGINX_CONF
+
+          # Create default upstream configuration
+          echo "📝 Creating default upstream configuration..."
+          sudo tee "$NGINX_SITES_DIR/default.conf" > /dev/null << EOF
+# Default configuration - modify as needed
+# This file will be updated by configure-nginx-service action
+
+# Example upstream (uncomment and modify as needed)
+# upstream backend_service {
+#     server backend_container:3000;
+#     # Add more backend servers for load balancing
+# }
+
+# Example server block (uncomment and modify as needed)
+# server {
+#     listen 80;
+#     server_name $DEFAULT_SERVER;
+#
+#     location / {
+#         proxy_pass http://backend_service;
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade \$http_upgrade;
+#         proxy_set_header Connection 'upgrade';
+#         proxy_set_header Host \$host;
+#         proxy_set_header X-Real-IP \$remote_addr;
+#         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto \$scheme;
+#         proxy_cache_bypass \$http_upgrade;
+#     }
+# }
+EOF
+
+          # Stop and remove existing nginx container if it exists
+          if sudo docker ps -a --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER}$"; then
+            echo "🛑 Stopping existing nginx container..."
+            sudo docker stop "$NGINX_CONTAINER" || true
+            echo "🗑 Removing existing nginx container..."
+            sudo docker rm "$NGINX_CONTAINER" || true
+          fi
+
+          # Pull latest nginx image
+          echo "📦 Pulling nginx Docker image..."
+          sudo docker pull nginx:alpine
+
+          # Start nginx container
+          echo "🚀 Starting nginx container..."
+          sudo docker run -d \
+            --name "$NGINX_CONTAINER" \
+            --network "$NETWORK_NAME" \
+            --restart unless-stopped \
+            -p "${HTTP_PORT}:80" \
+            -p "${HTTPS_PORT}:443" \
+            -v "$NGINX_CONFIG_DIR/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$NGINX_SITES_DIR:/etc/nginx/sites-enabled:ro" \
+            -v "$NGINX_SSL_DIR:/etc/nginx/ssl:ro" \
+            nginx:alpine
+
+          echo "✅ Nginx container started successfully!"
+          echo "📋 Container details:"
+          echo "   Name: $NGINX_CONTAINER"
+          echo "   Network: $NETWORK_NAME"
+          echo "   HTTP Port: $HTTP_PORT"
+          echo "   HTTPS Port: $HTTPS_PORT"
+          echo "   Config Directory: $NGINX_CONFIG_DIR"
+        EOF
+
+    - name: Configure UFW Firewall
+      shell: bash
+      env:
+        HTTP_PORT: "${{ inputs.http_port }}"
+        HTTPS_PORT: "${{ inputs.https_port }}"
+      run: |
+        echo "🔥 Configuring UFW firewall for nginx..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "HTTP_PORT='$HTTP_PORT' HTTPS_PORT='$HTTPS_PORT' bash -s" << 'EOF'
+          set -euo pipefail
+
+          echo "🔓 Opening HTTP port $HTTP_PORT..."
+          sudo ufw allow "$HTTP_PORT/tcp" || echo "Failed to open HTTP port"
+
+          echo "🔓 Opening HTTPS port $HTTPS_PORT..."
+          sudo ufw allow "$HTTPS_PORT/tcp" || echo "Failed to open HTTPS port"
+
+          echo "📊 Current UFW status:"
+          sudo ufw status | grep -E "(80|443|$HTTP_PORT|$HTTPS_PORT)" || echo "No HTTP/HTTPS rules found"
+
+          echo "✅ Firewall configured for nginx"
+        EOF
+
+    - name: Health Check and Validation
+      shell: bash
+      env:
+        NGINX_CONTAINER: "${{ inputs.nginx_container_name }}"
+        HTTP_PORT: "${{ inputs.http_port }}"
+      run: |
+        echo "🏥 Performing nginx health checks..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "NGINX_CONTAINER='$NGINX_CONTAINER' HTTP_PORT='$HTTP_PORT' bash -s" << 'EOF'
+          set -euo pipefail
+
+          # Wait for container to be ready
+          echo "⏳ Waiting for nginx container to start..."
+          for i in $(seq 1 30); do
+            container_status=$(sudo docker inspect -f '{{.State.Status}}' "$NGINX_CONTAINER" 2>/dev/null || echo "none")
+            if [ "$container_status" = "running" ]; then
+              echo "✅ Nginx container is running"
+              break
+            elif [ "$container_status" = "exited" ]; then
+              echo "❌ Nginx container exited unexpectedly. Logs:"
+              sudo docker logs --tail=20 "$NGINX_CONTAINER" || true
+              exit 1
+            fi
+            echo "🔄 Waiting for container... ($i/30) Status: $container_status"
+            sleep 2
+          done
+
+          # Test nginx configuration
+          echo "🔍 Testing nginx configuration..."
+          if sudo docker exec "$NGINX_CONTAINER" nginx -t; then
+            echo "✅ Nginx configuration is valid"
+          else
+            echo "❌ Nginx configuration test failed"
+            exit 1
+          fi
+
+          # Test health endpoint
+          echo "🩺 Testing health endpoint..."
+          sleep 3  # Give nginx a moment to fully start
+
+          VPS_IP=$(hostname -I | awk '{print $1}')
+          for i in $(seq 1 10); do
+            if curl -f -s "http://localhost:$HTTP_PORT/nginx-health" > /dev/null 2>&1; then
+              echo "✅ Health endpoint responding on localhost"
+              break
+            elif curl -f -s "http://$VPS_IP:$HTTP_PORT/nginx-health" > /dev/null 2>&1; then
+              echo "✅ Health endpoint responding on VPS IP"
+              break
+            fi
+            echo "🔄 Waiting for health endpoint... ($i/10)"
+            sleep 2
+          done
+
+          # Show container status and logs
+          echo "📊 Final nginx status:"
+          sudo docker ps --filter "name=$NGINX_CONTAINER" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+          echo "📝 Recent nginx logs:"
+          sudo docker logs --tail=10 "$NGINX_CONTAINER" || true
+
+          echo "🎉 Nginx setup completed successfully!"
+          echo ""
+          echo "📋 Next steps:"
+          echo "   1. Use configure-nginx-service action to add your services"
+          echo "   2. Configure SSL certificates if needed"
+          echo "   3. Test your service routing"
+          echo ""
+          echo "💡 Health check: http://$VPS_IP:$HTTP_PORT/nginx-health"
+        EOF
