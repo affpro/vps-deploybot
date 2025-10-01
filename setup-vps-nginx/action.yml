@@ -39,6 +39,17 @@ runs:
         cp "${{ github.action_path }}/nginx.conf.template" /tmp/nginx-templates/
         cp "${{ github.action_path }}/default.conf.template" /tmp/nginx-templates/
 
+    - name: Transfer Templates to VPS
+      shell: bash
+      run: |
+        echo "📝 Copying nginx configuration templates to VPS..."
+        scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+          /tmp/nginx-templates/nginx.conf.template \
+          "${{ inputs.user }}@${{ inputs.host }}:/tmp/nginx.conf.template"
+        scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+          /tmp/nginx-templates/default.conf.template \
+          "${{ inputs.user }}@${{ inputs.host }}:/tmp/default.conf.template"
+
     - name: Setup Nginx Container
       shell: bash
       env:
@@ -71,16 +82,8 @@ runs:
           sudo mkdir -p "$NGINX_CONFIG_DIR" "$NGINX_SITES_DIR" "$NGINX_SSL_DIR"
           sudo chmod 755 "$NGINX_CONFIG_DIR" "$NGINX_SITES_DIR" "$NGINX_SSL_DIR"
 
-          # Copy template files to VPS
-          echo "📝 Copying nginx configuration templates..."
-          scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no -o LogLevel=ERROR \
-            /tmp/nginx-templates/nginx.conf.template \
-            "${{ inputs.user }}@${{ inputs.host }}:/tmp/nginx.conf.template"
-          scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no -o LogLevel=ERROR \
-            /tmp/nginx-templates/default.conf.template \
-            "${{ inputs.user }}@${{ inputs.host }}:/tmp/default.conf.template"
-
-          # Move templates to nginx config directory
+          # Move templates from /tmp to nginx config directory
+          echo "📝 Installing nginx configuration files..."
           sudo mv /tmp/nginx.conf.template "$NGINX_CONFIG_DIR/nginx.conf"
           sudo mv /tmp/default.conf.template "$NGINX_SITES_DIR/default.conf"
 
