@@ -41,6 +41,14 @@ inputs:
     description: "Use Let's Encrypt staging server for testing (avoids rate limits)"
     required: false
     default: "false"
+  skip_if_exists:
+    description: "Skip certificate generation if valid certificate already exists"
+    required: false
+    default: "true"
+  force_renewal:
+    description: "Force certificate renewal even if not near expiry"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -85,12 +93,14 @@ runs:
         CHALLENGE_TYPE: "${{ inputs.challenge_type }}"
         WEBROOT_PATH: "${{ inputs.webroot_path }}"
         STAGING: "${{ inputs.staging }}"
+        SKIP_IF_EXISTS: "${{ inputs.skip_if_exists }}"
+        FORCE_RENEWAL: "${{ inputs.force_renewal }}"
       run: |
-        echo "🔐 Generating SSL certificate..."
+        echo "🔐 Checking SSL certificate status..."
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "CERT_TYPE='$CERT_TYPE' DOMAIN='$DOMAIN' SUBDOMAINS='$SUBDOMAINS' EMAIL='$EMAIL' CHALLENGE_TYPE='$CHALLENGE_TYPE' WEBROOT_PATH='$WEBROOT_PATH' STAGING='$STAGING' bash -s" <<-'EOF'
+          "CERT_TYPE='$CERT_TYPE' DOMAIN='$DOMAIN' SUBDOMAINS='$SUBDOMAINS' EMAIL='$EMAIL' CHALLENGE_TYPE='$CHALLENGE_TYPE' WEBROOT_PATH='$WEBROOT_PATH' STAGING='$STAGING' SKIP_IF_EXISTS='$SKIP_IF_EXISTS' FORCE_RENEWAL='$FORCE_RENEWAL' bash -s" <<-'EOF'
           set -euo pipefail
 
           STAGING_FLAG=""
@@ -133,15 +143,40 @@ runs:
           # Check if certificate already exists
           CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
           if [ -d "$CERT_PATH" ]; then
-            echo "⚠️  Certificate already exists at $CERT_PATH"
-            echo "📅 Certificate expiry:"
+            echo "✅ Certificate already exists at $CERT_PATH"
+            echo ""
+            echo "📅 Certificate details:"
             sudo certbot certificates -d "$DOMAIN" 2>/dev/null || true
             echo ""
-            read -p "Do you want to renew/recreate? (yes/no): " -r REPLY
-            if [[ ! $REPLY =~ ^[Yy]es$ ]]; then
-              echo "ℹ️  Skipping certificate generation"
-              exit 0
+
+            # Check certificate expiry
+            CERT_FILE="$CERT_PATH/cert.pem"
+            if [ -f "$CERT_FILE" ]; then
+              EXPIRY_DATE=$(sudo openssl x509 -enddate -noout -in "$CERT_FILE" | cut -d= -f2)
+              EXPIRY_EPOCH=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY_DATE" +%s 2>/dev/null)
+              CURRENT_EPOCH=$(date +%s)
+              DAYS_UNTIL_EXPIRY=$(( ($EXPIRY_EPOCH - $CURRENT_EPOCH) / 86400 ))
+
+              echo "📊 Certificate expires in $DAYS_UNTIL_EXPIRY days"
+
+              # Skip if certificate is valid and not near expiry
+              if [ "$SKIP_IF_EXISTS" = "true" ] && [ "$FORCE_RENEWAL" != "true" ] && [ $DAYS_UNTIL_EXPIRY -gt 30 ]; then
+                echo "✅ Certificate is valid and not near expiry (>30 days). Skipping generation."
+                echo "💡 Use force_renewal: true to renew anyway"
+                exit 0
+              fi
+
+              # Auto-renew if near expiry or force renewal
+              if [ "$FORCE_RENEWAL" = "true" ] || [ $DAYS_UNTIL_EXPIRY -le 30 ]; then
+                if [ "$FORCE_RENEWAL" = "true" ]; then
+                  echo "🔄 Force renewal requested"
+                else
+                  echo "⚠️  Certificate expires in $DAYS_UNTIL_EXPIRY days, proceeding with renewal"
+                fi
+              fi
             fi
+          else
+            echo "📝 No existing certificate found, generating new certificate..."
           fi
 
           # Generate certificate based on challenge type

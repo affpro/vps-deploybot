@@ -9,6 +9,8 @@ Generate and manage SSL/TLS certificates using Let's Encrypt certbot. Supports b
 - 🔄 **Auto-renewal** with systemd timer and nginx reload hook
 - 🧪 **Staging mode** to test without hitting rate limits
 - 📦 **Host installation** for persistent certificates
+- ✅ **Idempotent** - safely runs in automated workflows, skips if cert exists and is valid
+- 🔁 **Smart renewal** - automatically renews certs within 30 days of expiry
 
 ## Prerequisites
 
@@ -16,13 +18,24 @@ Generate and manage SSL/TLS certificates using Let's Encrypt certbot. Supports b
 - Domain name with DNS access (for wildcard certs)
 - Email address for Let's Encrypt notifications
 
+## Important: Idempotent Behavior
+
+This action is **idempotent** and safe to include in automated workflows:
+
+- ✅ **Skips generation** if valid certificate exists (>30 days until expiry)
+- 🔄 **Auto-renews** if certificate expires within 30 days
+- 🚀 **No manual intervention** needed after first-time setup
+- ⚠️ **First-time DNS-01**: Requires manual DNS TXT record (run separately)
+
+**For automated workflows**: Run DNS-01 setup once manually, then include action in CI/CD - it will skip if cert is valid or auto-renew when needed.
+
 ## Usage
 
 ### Wildcard Certificate (Recommended for Multiple Subdomains)
 
 ```yaml
 - name: Generate Wildcard SSL Certificate
-  uses: affpro/vps-deploybot/setup-ssl-certificates@v0.0.82
+  uses: affpro/vps-deploybot/setup-ssl-certificates@v0.0.83
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
@@ -30,14 +43,20 @@ Generate and manage SSL/TLS certificates using Let's Encrypt certbot. Supports b
     domain: taxi-laguna.com
     email: admin@taxi-laguna.com
     challenge_type: dns
+    skip_if_exists: true  # Default: skips if cert valid
 ```
 
-**Process:**
+**First-time setup (requires manual DNS TXT record):**
 1. Action installs certbot on VPS
-2. Certbot will prompt you to add a DNS TXT record
+2. Certbot prompts you to add a DNS TXT record
 3. Add `_acme-challenge.taxi-laguna.com` TXT record with provided value
 4. Certificate generated for `taxi-laguna.com` and `*.taxi-laguna.com`
 5. Certificates stored at `/etc/letsencrypt/live/taxi-laguna.com/`
+
+**Subsequent runs:**
+- Action checks existing certificate
+- Skips if valid (>30 days until expiry)
+- Auto-renews if <30 days until expiry
 
 ### Individual Certificate (Specific Subdomains)
 
@@ -107,6 +126,8 @@ After generating certificates, configure your services with SSL:
 | `webroot_path` | No | `/var/www/certbot` | Webroot path for HTTP-01 challenge |
 | `nginx_container_name` | No | `nginx_proxy` | Nginx container name for reload hook |
 | `staging` | No | `false` | Use staging server for testing |
+| `skip_if_exists` | No | `true` | Skip if valid cert exists (>30 days until expiry) |
+| `force_renewal` | No | `false` | Force renewal even if cert is valid |
 
 ## Certificate Paths
 
@@ -128,13 +149,20 @@ Certificates are automatically configured for renewal:
 - **Hook**: Automatically reloads nginx container after renewal
 - **Test renewal**: `sudo certbot renew --dry-run`
 
-## Complete Workflow Example
+## Workflow Integration Strategies
+
+### Strategy 1: Automated (Recommended)
+
+Include SSL action in your main deployment workflow. It will:
+- ✅ Skip if cert exists and valid
+- 🔄 Auto-renew if expiring soon (<30 days)
+- ⚠️ **First run only**: Manual DNS TXT record required (run workflow manually once)
 
 ```yaml
 name: Deploy with HTTPS
-
 on:
-  workflow_dispatch:
+  push:
+    branches: [master]
 
 jobs:
   deploy:
@@ -148,16 +176,16 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # Setup nginx reverse proxy
+      # Setup infrastructure (idempotent)
       - name: Setup Nginx
-        uses: affpro/vps-deploybot/setup-vps-nginx@v0.0.81
+        uses: affpro/vps-deploybot/setup-vps-nginx@v0.0.83
         with:
           host: ${{ secrets.VPS_HOST }}
           user: ${{ secrets.VPS_USER }}
 
-      # Generate wildcard SSL certificate
-      - name: Setup SSL Certificate
-        uses: affpro/vps-deploybot/setup-ssl-certificates@v0.0.82
+      # SSL cert check (idempotent - skips if valid, renews if needed)
+      - name: Ensure SSL Certificate
+        uses: affpro/vps-deploybot/setup-ssl-certificates@v0.0.83
         with:
           host: ${{ secrets.VPS_HOST }}
           user: ${{ secrets.VPS_USER }}
@@ -165,8 +193,9 @@ jobs:
           domain: taxi-laguna.com
           email: admin@taxi-laguna.com
           challenge_type: dns
+          skip_if_exists: true  # Safe for automation
 
-      # Configure service with HTTPS
+      # Deploy and configure service
       - name: Configure API Service
         uses: affpro/vps-deploybot/configure-nginx-service@v0.0.80
         with:
@@ -181,6 +210,38 @@ jobs:
           ssl_cert_path: /etc/nginx/letsencrypt/live/taxi-laguna.com/fullchain.pem
           ssl_key_path: /etc/nginx/letsencrypt/live/taxi-laguna.com/privkey.pem
 ```
+
+**How to use:**
+1. First deployment: Run workflow manually via GitHub UI (you'll need to add DNS TXT record)
+2. Subsequent deployments: Workflow runs automatically on push, skips cert generation if valid
+
+### Strategy 2: Separate One-time Setup
+
+Run SSL setup once manually, exclude from main workflow:
+
+```yaml
+# .github/workflows/setup-ssl-once.yml
+name: One-time SSL Setup
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  ssl-setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSL Certificate
+        uses: affpro/vps-deploybot/setup-ssl-certificates@v0.0.83
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          user: ${{ secrets.VPS_USER }}
+          cert_type: wildcard
+          domain: taxi-laguna.com
+          email: admin@taxi-laguna.com
+          challenge_type: dns
+          force_renewal: false  # Only generate if missing
+```
+
+Then use certs in your main workflow without SSL generation step.
 
 ## Troubleshooting
 
