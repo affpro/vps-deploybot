@@ -252,17 +252,16 @@ runs:
 
           sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 
-          sudo bash -c "cat > $HOOK_SCRIPT" <<'HOOK'
-#!/bin/bash
-# Reload nginx container after certificate renewal
-if docker ps --format '{{.Names}}' | grep -q "^nginx_proxy$"; then
-  echo "🔄 Reloading nginx after certificate renewal..."
-  docker exec nginx_proxy nginx -s reload
-  echo "✅ Nginx reloaded successfully"
-else
-  echo "⚠️  Nginx container not found, skipping reload"
-fi
-HOOK
+          # Create hook script using echo to avoid nested heredoc issues
+          sudo bash -c "echo '#!/bin/bash' > $HOOK_SCRIPT"
+          sudo bash -c "echo '# Reload nginx container after certificate renewal' >> $HOOK_SCRIPT"
+          sudo bash -c "echo 'if docker ps --format '\"'\"'{{.Names}}'\"'\"' | grep -q \"^nginx_proxy\$\"; then' >> $HOOK_SCRIPT"
+          sudo bash -c "echo '  echo \"🔄 Reloading nginx after certificate renewal...\"' >> $HOOK_SCRIPT"
+          sudo bash -c "echo '  docker exec nginx_proxy nginx -s reload' >> $HOOK_SCRIPT"
+          sudo bash -c "echo '  echo \"✅ Nginx reloaded successfully\"' >> $HOOK_SCRIPT"
+          sudo bash -c "echo 'else' >> $HOOK_SCRIPT"
+          sudo bash -c "echo '  echo \"⚠️  Nginx container not found, skipping reload\"' >> $HOOK_SCRIPT"
+          sudo bash -c "echo 'fi' >> $HOOK_SCRIPT"
 
           sudo chmod +x "$HOOK_SCRIPT"
           echo "✅ Renewal hook created: $HOOK_SCRIPT"
