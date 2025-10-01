@@ -66,109 +66,109 @@ runs:
 
           # Create main nginx.conf
           echo "📝 Creating main nginx configuration..."
-          sudo bash -c "cat > \$NGINX_CONFIG_DIR/nginx.conf" <<'NGINX_CONF'
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
+          sudo bash -c "cat > \$NGINX_CONFIG_DIR/nginx.conf" <<-'NGINX_CONF'
+		user nginx;
+		worker_processes auto;
+		error_log /var/log/nginx/error.log warn;
+		pid /var/run/nginx.pid;
 
-events {
-    worker_connections 1024;
-}
+		events {
+		    worker_connections 1024;
+		}
 
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
+		http {
+		    include       /etc/nginx/mime.types;
+		    default_type  application/octet-stream;
 
-    # Logging format
-    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
-                    '\$status \$body_bytes_sent "\$http_referer" '
-                    '"\$http_user_agent" "\$http_x_forwarded_for"';
+		    # Logging format
+		    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+		                    '\$status \$body_bytes_sent "\$http_referer" '
+		                    '"\$http_user_agent" "\$http_x_forwarded_for"';
 
-    access_log /var/log/nginx/access.log main;
+		    access_log /var/log/nginx/access.log main;
 
-    # Basic settings
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    types_hash_max_size 2048;
-    client_max_body_size 100m;
+		    # Basic settings
+		    sendfile on;
+		    tcp_nopush on;
+		    tcp_nodelay on;
+		    keepalive_timeout 65;
+		    types_hash_max_size 2048;
+		    client_max_body_size 100m;
 
-    # Gzip compression
-    gzip on;
-    gzip_vary on;
-    gzip_proxied any;
-    gzip_comp_level 6;
-    gzip_types
-        text/plain
-        text/css
-        text/xml
-        text/javascript
-        application/json
-        application/javascript
-        application/xml+rss
-        application/atom+xml
-        image/svg+xml;
+		    # Gzip compression
+		    gzip on;
+		    gzip_vary on;
+		    gzip_proxied any;
+		    gzip_comp_level 6;
+		    gzip_types
+		        text/plain
+		        text/css
+		        text/xml
+		        text/javascript
+		        application/json
+		        application/javascript
+		        application/xml+rss
+		        application/atom+xml
+		        image/svg+xml;
 
-    # Security headers (default)
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
+		    # Security headers (default)
+		    add_header X-Frame-Options DENY;
+		    add_header X-Content-Type-Options nosniff;
+		    add_header X-XSS-Protection "1; mode=block";
 
-    # Include server configurations
-    include /etc/nginx/sites-enabled/*;
+		    # Include server configurations
+		    include /etc/nginx/sites-enabled/*;
 
-    # Default server (fallback)
-    server {
-        listen 80 default_server;
-        listen [::]:80 default_server;
-        server_name _;
+		    # Default server (fallback)
+		    server {
+		        listen 80 default_server;
+		        listen [::]:80 default_server;
+		        server_name _;
 
-        location / {
-            return 444;  # Drop connection for unknown hosts
-        }
+		        location / {
+		            return 444;  # Drop connection for unknown hosts
+		        }
 
-        # Health check endpoint
-        location /nginx-health {
-            access_log off;
-            return 200 "nginx-ok\n";
-            add_header Content-Type text/plain;
-        }
-    }
-}
-NGINX_CONF
+		        # Health check endpoint
+		        location /nginx-health {
+		            access_log off;
+		            return 200 "nginx-ok\n";
+		            add_header Content-Type text/plain;
+		        }
+		    }
+		}
+		NGINX_CONF
 
           # Create default upstream configuration
           echo "📝 Creating default upstream configuration..."
-          sudo bash -c "cat > \$NGINX_SITES_DIR/default.conf" <<'DEFAULTCONF'
-# Default configuration - modify as needed
-# This file will be updated by configure-nginx-service action
+          sudo bash -c "cat > \$NGINX_SITES_DIR/default.conf" <<-'DEFAULTCONF'
+		# Default configuration - modify as needed
+		# This file will be updated by configure-nginx-service action
 
-# Example upstream (uncomment and modify as needed)
-# upstream backend_service {
-#     server backend_container:3000;
-#     # Add more backend servers for load balancing
-# }
+		# Example upstream (uncomment and modify as needed)
+		# upstream backend_service {
+		#     server backend_container:3000;
+		#     # Add more backend servers for load balancing
+		# }
 
-# Example server block (uncomment and modify as needed)
-# server {
-#     listen 80;
-#     server_name $DEFAULT_SERVER;
-#
-#     location / {
-#         proxy_pass http://backend_service;
-#         proxy_http_version 1.1;
-#         proxy_set_header Upgrade \$http_upgrade;
-#         proxy_set_header Connection 'upgrade';
-#         proxy_set_header Host \$host;
-#         proxy_set_header X-Real-IP \$remote_addr;
-#         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-#         proxy_set_header X-Forwarded-Proto \$scheme;
-#         proxy_cache_bypass \$http_upgrade;
-#     }
-# }
-DEFAULTCONF
+		# Example server block (uncomment and modify as needed)
+		# server {
+		#     listen 80;
+		#     server_name $DEFAULT_SERVER;
+		#
+		#     location / {
+		#         proxy_pass http://backend_service;
+		#         proxy_http_version 1.1;
+		#         proxy_set_header Upgrade \$http_upgrade;
+		#         proxy_set_header Connection 'upgrade';
+		#         proxy_set_header Host \$host;
+		#         proxy_set_header X-Real-IP \$remote_addr;
+		#         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+		#         proxy_set_header X-Forwarded-Proto \$scheme;
+		#         proxy_cache_bypass \$http_upgrade;
+		#     }
+		# }
+		DEFAULTCONF
 
           # Stop and remove existing nginx container if it exists
           if sudo docker ps -a --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER}$"; then
