@@ -80,7 +80,7 @@ runs:
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "SERVICE_NAME='$SERVICE_NAME' CONTAINER_NAME='$CONTAINER_NAME' CONTAINER_PORT='$CONTAINER_PORT' ROUTING_TYPE='$ROUTING_TYPE' SERVER_NAME='$SERVER_NAME' PATH_PREFIX='$PATH_PREFIX' DOMAIN='$DOMAIN' NGINX_CONTAINER='$NGINX_CONTAINER' REMOVE_SERVICE='$REMOVE_SERVICE' ENABLE_SSL='$ENABLE_SSL' SSL_CERT_PATH='$SSL_CERT_PATH' SSL_KEY_PATH='$SSL_KEY_PATH' bash -s" << 'EOF'
+          "SERVICE_NAME='$SERVICE_NAME' CONTAINER_NAME='$CONTAINER_NAME' CONTAINER_PORT='$CONTAINER_PORT' ROUTING_TYPE='$ROUTING_TYPE' SERVER_NAME='$SERVER_NAME' PATH_PREFIX='$PATH_PREFIX' DOMAIN='$DOMAIN' NGINX_CONTAINER='$NGINX_CONTAINER' REMOVE_SERVICE='$REMOVE_SERVICE' ENABLE_SSL='$ENABLE_SSL' SSL_CERT_PATH='$SSL_CERT_PATH' SSL_KEY_PATH='$SSL_KEY_PATH' bash -s" <<-'EOF'
           set -euo pipefail
 
           NGINX_SITES_DIR="/opt/nginx/sites-enabled"
@@ -153,7 +153,7 @@ runs:
           echo "   Location: $FINAL_LOCATION"
 
           # Create the configuration file
-          sudo bash -c "cat > $CONFIG_FILE" <<NGINX_CONFIG
+          sudo bash -c "cat > \$CONFIG_FILE" <<NGINX_CONFIG
 # Configuration for service: $SERVICE_NAME
 # Generated on: $(date)
 # Routing type: $ROUTING_TYPE
@@ -209,7 +209,7 @@ NGINX_CONFIG
 
           # Add health check location for path-based routing
           if [ "$ROUTING_TYPE" = "path" ]; then
-            sudo bash -c "cat >> $CONFIG_FILE" <<HEALTH_CHECK
+            sudo bash -c "cat >> \$CONFIG_FILE" <<HEALTH_CHECK
     location ${PATH_PREFIX}/health {
         proxy_pass http://${SERVICE_NAME}_backend/health;
         proxy_set_header Host \\\$host;
@@ -223,7 +223,7 @@ HEALTH_CHECK
 
           # Add SSL configuration if enabled
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
-            sudo bash -c "cat >> $CONFIG_FILE" <<SSL_CONFIG
+            sudo bash -c "cat >> \$CONFIG_FILE" <<SSL_CONFIG
 }
 
 # HTTPS Server Block
@@ -269,7 +269,7 @@ SSL_CONFIG
 
             # Add SSL health check for path-based routing
             if [ "$ROUTING_TYPE" = "path" ]; then
-              sudo bash -c "cat >> $CONFIG_FILE" <<SSL_HEALTH_CHECK
+              sudo bash -c "cat >> \$CONFIG_FILE" <<SSL_HEALTH_CHECK
 
     location ${PATH_PREFIX}/health {
         proxy_pass http://${SERVICE_NAME}_backend/health;
@@ -344,7 +344,7 @@ SSL_HEALTH_CHECK
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "SERVICE_NAME='$SERVICE_NAME' NGINX_CONTAINER='$NGINX_CONTAINER' bash -s" << 'EOF'
+          "SERVICE_NAME='$SERVICE_NAME' NGINX_CONTAINER='$NGINX_CONTAINER' bash -s" <<-'EOF'
           set -euo pipefail
 
           CONFIG_FILE="/opt/nginx/sites-enabled/service-$SERVICE_NAME.conf"

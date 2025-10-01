@@ -43,7 +43,7 @@ runs:
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "NGINX_CONTAINER='$NGINX_CONTAINER' HTTP_PORT='$HTTP_PORT' HTTPS_PORT='$HTTPS_PORT' DEFAULT_SERVER='$DEFAULT_SERVER' bash -s" << 'EOF'
+          "NGINX_CONTAINER='$NGINX_CONTAINER' HTTP_PORT='$HTTP_PORT' HTTPS_PORT='$HTTPS_PORT' DEFAULT_SERVER='$DEFAULT_SERVER' bash -s" <<-'EOF'
           set -euo pipefail
 
           echo "🌐 Setting up Nginx reverse proxy..."
@@ -66,7 +66,7 @@ runs:
 
           # Create main nginx.conf
           echo "📝 Creating main nginx configuration..."
-          sudo bash -c "cat > $NGINX_CONFIG_DIR/nginx.conf" <<'NGINX_CONF'
+          sudo bash -c "cat > \$NGINX_CONFIG_DIR/nginx.conf" <<'NGINX_CONF'
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
@@ -141,7 +141,7 @@ NGINX_CONF
 
           # Create default upstream configuration
           echo "📝 Creating default upstream configuration..."
-          sudo bash -c "cat > $NGINX_SITES_DIR/default.conf" <<'DEFAULTCONF'
+          sudo bash -c "cat > \$NGINX_SITES_DIR/default.conf" <<'DEFAULTCONF'
 # Default configuration - modify as needed
 # This file will be updated by configure-nginx-service action
 
@@ -214,7 +214,7 @@ DEFAULTCONF
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "HTTP_PORT='$HTTP_PORT' HTTPS_PORT='$HTTPS_PORT' bash -s" << 'EOF'
+          "HTTP_PORT='$HTTP_PORT' HTTPS_PORT='$HTTPS_PORT' bash -s" <<-'EOF'
           set -euo pipefail
 
           echo "🔓 Opening HTTP port $HTTP_PORT..."
@@ -239,7 +239,7 @@ DEFAULTCONF
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "NGINX_CONTAINER='$NGINX_CONTAINER' HTTP_PORT='$HTTP_PORT' bash -s" << 'EOF'
+          "NGINX_CONTAINER='$NGINX_CONTAINER' HTTP_PORT='$HTTP_PORT' bash -s" <<-'EOF'
           set -euo pipefail
 
           # Wait for container to be ready
