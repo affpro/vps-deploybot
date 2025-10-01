@@ -1,0 +1,284 @@
+name: Setup SSL Certificates
+description: "Generate and manage SSL/TLS certificates using Let's Encrypt certbot. Supports both wildcard (DNS-01) and individual (HTTP-01) certificates."
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  cert_type:
+    description: "Certificate type: 'wildcard' or 'individual'"
+    required: true
+  domain:
+    description: "Primary domain (e.g., taxi-laguna.com)"
+    required: true
+  subdomains:
+    description: "Comma-separated subdomains for individual certs (e.g., api,admin,www). Not needed for wildcard."
+    required: false
+    default: ""
+  email:
+    description: "Email address for Let's Encrypt notifications"
+    required: true
+  challenge_type:
+    description: "Challenge type: 'dns' or 'http'. Use 'dns' for wildcard certs."
+    required: false
+    default: "dns"
+  webroot_path:
+    description: "Webroot path for HTTP-01 challenge"
+    required: false
+    default: "/var/www/certbot"
+  nginx_container_name:
+    description: "Name of the nginx container to reload after cert generation"
+    required: false
+    default: "nginx_proxy"
+  staging:
+    description: "Use Let's Encrypt staging server for testing (avoids rate limits)"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Certbot
+      shell: bash
+      env:
+        CHALLENGE_TYPE: "${{ inputs.challenge_type }}"
+      run: |
+        echo "📦 Installing certbot on VPS..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "CHALLENGE_TYPE='$CHALLENGE_TYPE' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          echo "🔍 Checking if certbot is installed..."
+          if command -v certbot &> /dev/null; then
+            echo "✅ Certbot already installed: $(certbot --version)"
+          else
+            echo "📥 Installing certbot..."
+            sudo apt-get update -qq
+            sudo apt-get install -y certbot
+            echo "✅ Certbot installed: $(certbot --version)"
+          fi
+
+          # Create webroot directory for HTTP-01 challenge if needed
+          if [ "$CHALLENGE_TYPE" = "http" ]; then
+            echo "📁 Creating webroot directory for HTTP-01 challenge..."
+            sudo mkdir -p /var/www/certbot
+            sudo chmod 755 /var/www/certbot
+          fi
+        EOF
+
+    - name: Generate Certificate
+      shell: bash
+      env:
+        CERT_TYPE: "${{ inputs.cert_type }}"
+        DOMAIN: "${{ inputs.domain }}"
+        SUBDOMAINS: "${{ inputs.subdomains }}"
+        EMAIL: "${{ inputs.email }}"
+        CHALLENGE_TYPE: "${{ inputs.challenge_type }}"
+        WEBROOT_PATH: "${{ inputs.webroot_path }}"
+        STAGING: "${{ inputs.staging }}"
+      run: |
+        echo "🔐 Generating SSL certificate..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "CERT_TYPE='$CERT_TYPE' DOMAIN='$DOMAIN' SUBDOMAINS='$SUBDOMAINS' EMAIL='$EMAIL' CHALLENGE_TYPE='$CHALLENGE_TYPE' WEBROOT_PATH='$WEBROOT_PATH' STAGING='$STAGING' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          STAGING_FLAG=""
+          if [ "$STAGING" = "true" ]; then
+            STAGING_FLAG="--staging"
+            echo "⚠️  Using Let's Encrypt staging server (certificates won't be trusted)"
+          fi
+
+          # Build domain arguments
+          DOMAIN_ARGS="-d $DOMAIN"
+
+          if [ "$CERT_TYPE" = "wildcard" ]; then
+            echo "🌐 Generating wildcard certificate for *.$DOMAIN"
+            DOMAIN_ARGS="$DOMAIN_ARGS -d *.$DOMAIN"
+
+            if [ "$CHALLENGE_TYPE" != "dns" ]; then
+              echo "⚠️  Wildcard certificates require DNS-01 challenge. Switching to DNS challenge."
+              CHALLENGE_TYPE="dns"
+            fi
+          elif [ "$CERT_TYPE" = "individual" ]; then
+            if [ -z "$SUBDOMAINS" ]; then
+              echo "❌ subdomains parameter required for individual certificate type"
+              exit 1
+            fi
+
+            echo "📋 Generating individual certificate for: $DOMAIN and subdomains"
+            IFS=',' read -ra SUBDOMAIN_ARRAY <<< "$SUBDOMAINS"
+            for subdomain in "${SUBDOMAIN_ARRAY[@]}"; do
+              subdomain=$(echo "$subdomain" | xargs)  # trim whitespace
+              if [ -n "$subdomain" ]; then
+                DOMAIN_ARGS="$DOMAIN_ARGS -d ${subdomain}.${DOMAIN}"
+                echo "   - ${subdomain}.${DOMAIN}"
+              fi
+            done
+          else
+            echo "❌ Invalid cert_type: $CERT_TYPE (must be 'wildcard' or 'individual')"
+            exit 1
+          fi
+
+          # Check if certificate already exists
+          CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
+          if [ -d "$CERT_PATH" ]; then
+            echo "⚠️  Certificate already exists at $CERT_PATH"
+            echo "📅 Certificate expiry:"
+            sudo certbot certificates -d "$DOMAIN" 2>/dev/null || true
+            echo ""
+            read -p "Do you want to renew/recreate? (yes/no): " -r REPLY
+            if [[ ! $REPLY =~ ^[Yy]es$ ]]; then
+              echo "ℹ️  Skipping certificate generation"
+              exit 0
+            fi
+          fi
+
+          # Generate certificate based on challenge type
+          if [ "$CHALLENGE_TYPE" = "dns" ]; then
+            echo ""
+            echo "🔐 Starting DNS-01 challenge for certificate generation..."
+            echo "⚠️  IMPORTANT: You will need to add DNS TXT records manually"
+            echo ""
+
+            sudo certbot certonly \
+              --manual \
+              --preferred-challenges dns \
+              --email "$EMAIL" \
+              --agree-tos \
+              --no-eff-email \
+              $STAGING_FLAG \
+              $DOMAIN_ARGS
+
+          elif [ "$CHALLENGE_TYPE" = "http" ]; then
+            echo "🌐 Starting HTTP-01 challenge..."
+
+            if [ ! -d "$WEBROOT_PATH" ]; then
+              echo "❌ Webroot path does not exist: $WEBROOT_PATH"
+              exit 1
+            fi
+
+            sudo certbot certonly \
+              --webroot \
+              -w "$WEBROOT_PATH" \
+              --email "$EMAIL" \
+              --agree-tos \
+              --no-eff-email \
+              --non-interactive \
+              $STAGING_FLAG \
+              $DOMAIN_ARGS
+          else
+            echo "❌ Invalid challenge_type: $CHALLENGE_TYPE (must be 'dns' or 'http')"
+            exit 1
+          fi
+
+          if [ $? -eq 0 ]; then
+            echo ""
+            echo "✅ Certificate generated successfully!"
+            echo ""
+            echo "📋 Certificate details:"
+            sudo certbot certificates -d "$DOMAIN"
+            echo ""
+            echo "📁 Certificate files location:"
+            echo "   Cert: /etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+            echo "   Key:  /etc/letsencrypt/live/$DOMAIN/privkey.pem"
+          else
+            echo "❌ Certificate generation failed"
+            exit 1
+          fi
+        EOF
+
+    - name: Setup Auto-Renewal
+      shell: bash
+      env:
+        NGINX_CONTAINER: "${{ inputs.nginx_container_name }}"
+        DOMAIN: "${{ inputs.domain }}"
+      run: |
+        echo "🔄 Setting up certificate auto-renewal..."
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "NGINX_CONTAINER='$NGINX_CONTAINER' DOMAIN='$DOMAIN' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          # Create renewal hook script
+          HOOK_SCRIPT="/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh"
+          echo "📝 Creating renewal hook script..."
+
+          sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+
+          sudo bash -c "cat > $HOOK_SCRIPT" <<'HOOK'
+#!/bin/bash
+# Reload nginx container after certificate renewal
+if docker ps --format '{{.Names}}' | grep -q "^nginx_proxy$"; then
+  echo "🔄 Reloading nginx after certificate renewal..."
+  docker exec nginx_proxy nginx -s reload
+  echo "✅ Nginx reloaded successfully"
+else
+  echo "⚠️  Nginx container not found, skipping reload"
+fi
+HOOK
+
+          sudo chmod +x "$HOOK_SCRIPT"
+          echo "✅ Renewal hook created: $HOOK_SCRIPT"
+
+          # Test certbot renewal (dry run)
+          echo "🧪 Testing certificate renewal (dry run)..."
+          if sudo certbot renew --dry-run --cert-name "$DOMAIN"; then
+            echo "✅ Renewal test passed"
+          else
+            echo "⚠️  Renewal test failed, but certificate is still valid"
+          fi
+
+          # Check systemd timer status
+          echo ""
+          echo "📊 Certbot renewal timer status:"
+          sudo systemctl status certbot.timer --no-pager || echo "⚠️  Certbot timer not found (will use cron)"
+
+          echo ""
+          echo "✅ Auto-renewal configured!"
+          echo "ℹ️  Certificates will auto-renew via systemd timer or cron"
+        EOF
+
+    - name: Display Certificate Info
+      shell: bash
+      env:
+        DOMAIN: "${{ inputs.domain }}"
+        NGINX_CONTAINER: "${{ inputs.nginx_container_name }}"
+      run: |
+        echo "📋 Certificate setup completed!"
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "DOMAIN='$DOMAIN' NGINX_CONTAINER='$NGINX_CONTAINER' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          echo ""
+          echo "🎉 SSL Certificate Setup Complete!"
+          echo ""
+          echo "📁 Certificate paths for nginx configuration:"
+          echo "   ssl_certificate:     /etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+          echo "   ssl_certificate_key: /etc/letsencrypt/live/$DOMAIN/privkey.pem"
+          echo ""
+          echo "💡 Next steps:"
+          echo "   1. Mount certificates into nginx container:"
+          echo "      -v /etc/letsencrypt:/etc/nginx/letsencrypt:ro"
+          echo ""
+          echo "   2. Use configure-nginx-service action with SSL enabled:"
+          echo "      enable_ssl: true"
+          echo "      ssl_cert_path: /etc/nginx/letsencrypt/live/$DOMAIN/fullchain.pem"
+          echo "      ssl_key_path: /etc/nginx/letsencrypt/live/$DOMAIN/privkey.pem"
+          echo ""
+          echo "   3. Verify renewal timer is active:"
+          echo "      sudo systemctl status certbot.timer"
+        EOF

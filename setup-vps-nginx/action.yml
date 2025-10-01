@@ -110,6 +110,7 @@ runs:
             -v "$NGINX_CONFIG_DIR/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$NGINX_SITES_DIR:/etc/nginx/sites-enabled:ro" \
             -v "$NGINX_SSL_DIR:/etc/nginx/ssl:ro" \
+            -v "/etc/letsencrypt:/etc/nginx/letsencrypt:ro" \
             nginx:alpine
 
           echo "✅ Nginx container started successfully!"
