@@ -152,82 +152,88 @@ runs:
           echo "   Server: $FINAL_SERVER_NAME"
           echo "   Location: $FINAL_LOCATION"
 
-          # Create the configuration file
-          sudo tee "$CONFIG_FILE" > /dev/null << NGINX_CONFIG
-upstream ${SERVICE_NAME}_backend { server $CONTAINER_NAME:$CONTAINER_PORT; }
-server {
-    listen 80;
-    server_name $FINAL_SERVER_NAME;
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    location $FINAL_LOCATION {
-        proxy_pass http://${SERVICE_NAME}_backend$PROXY_PASS_PATH;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering on;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-        proxy_busy_buffers_size 256k;
-    }
-NGINX_CONFIG
+          # Create the configuration file using echo to avoid heredoc issues
+          sudo bash -c "echo 'upstream ${SERVICE_NAME}_backend { server $CONTAINER_NAME:$CONTAINER_PORT; }' > $CONFIG_FILE"
+          sudo bash -c "echo 'server {' >> $CONFIG_FILE"
+          sudo bash -c "echo '    listen 80;' >> $CONFIG_FILE"
+          sudo bash -c "echo '    server_name $FINAL_SERVER_NAME;' >> $CONFIG_FILE"
+          sudo bash -c "echo '    add_header X-Frame-Options DENY;' >> $CONFIG_FILE"
+          sudo bash -c "echo '    add_header X-Content-Type-Options nosniff;' >> $CONFIG_FILE"
+          sudo bash -c "echo '    add_header X-XSS-Protection \"1; mode=block\";' >> $CONFIG_FILE"
+          sudo bash -c "echo '    location $FINAL_LOCATION {' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend$PROXY_PASS_PATH;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_http_version 1.1;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_set_header Upgrade \$http_upgrade;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_set_header Connection '"'"'upgrade'"'"';' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_cache_bypass \$http_upgrade;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_set_header Host \$host;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_set_header X-Real-IP \$remote_addr;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_set_header X-Forwarded-Proto \$scheme;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_connect_timeout 60s;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_send_timeout 60s;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_read_timeout 60s;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_buffering on;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_buffer_size 128k;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_buffers 4 256k;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_busy_buffers_size 256k;' >> $CONFIG_FILE"
+          sudo bash -c "echo '    }' >> $CONFIG_FILE"
 
           # Add health check location for path-based routing
           if [ "$ROUTING_TYPE" = "path" ]; then
-            sudo tee -a "$CONFIG_FILE" > /dev/null << HEALTH_CHECK
-    location ${PATH_PREFIX}/health { proxy_pass http://${SERVICE_NAME}_backend/health; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; access_log off; }
-HEALTH_CHECK
+            sudo bash -c "echo '    location ${PATH_PREFIX}/health {' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend/health;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header Host \$host;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header X-Real-IP \$remote_addr;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header X-Forwarded-Proto \$scheme;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        access_log off;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    }' >> $CONFIG_FILE"
           fi
 
           # Add SSL configuration if enabled
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
-            sudo tee -a "$CONFIG_FILE" > /dev/null << SSL_CONFIG
-}
-server {
-    listen 443 ssl http2;
-    server_name $FINAL_SERVER_NAME;
-    ssl_certificate $SSL_CERT_PATH;
-    ssl_certificate_key $SSL_KEY_PATH;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    location $FINAL_LOCATION {
-        proxy_pass http://${SERVICE_NAME}_backend$PROXY_PASS_PATH;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering on;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-        proxy_busy_buffers_size 256k;
-    }
-SSL_CONFIG
+            sudo bash -c "echo '}' >> $CONFIG_FILE"
+            sudo bash -c "echo 'server {' >> $CONFIG_FILE"
+            sudo bash -c "echo '    listen 443 ssl http2;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    server_name $FINAL_SERVER_NAME;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    ssl_certificate $SSL_CERT_PATH;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    ssl_certificate_key $SSL_KEY_PATH;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    ssl_protocols TLSv1.2 TLSv1.3;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    add_header X-Frame-Options DENY;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    add_header X-Content-Type-Options nosniff;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    add_header X-XSS-Protection \"1; mode=block\";' >> $CONFIG_FILE"
+            sudo bash -c "echo '    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    location $FINAL_LOCATION {' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend$PROXY_PASS_PATH;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_http_version 1.1;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header Upgrade \$http_upgrade;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header Connection '"'"'upgrade'"'"';' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_cache_bypass \$http_upgrade;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header Host \$host;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header X-Real-IP \$remote_addr;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_set_header X-Forwarded-Proto https;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_connect_timeout 60s;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_send_timeout 60s;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_read_timeout 60s;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_buffering on;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_buffer_size 128k;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_buffers 4 256k;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_busy_buffers_size 256k;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    }' >> $CONFIG_FILE"
 
             # Add SSL health check for path-based routing
             if [ "$ROUTING_TYPE" = "path" ]; then
-              sudo tee -a "$CONFIG_FILE" > /dev/null << SSL_HEALTH_CHECK
-    location ${PATH_PREFIX}/health { proxy_pass http://${SERVICE_NAME}_backend/health; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto https; access_log off; }
-SSL_HEALTH_CHECK
+              sudo bash -c "echo '    location ${PATH_PREFIX}/health {' >> $CONFIG_FILE"
+              sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend/health;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        proxy_set_header Host \$host;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        proxy_set_header X-Real-IP \$remote_addr;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        proxy_set_header X-Forwarded-Proto https;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        access_log off;' >> $CONFIG_FILE"
+              sudo bash -c "echo '    }' >> $CONFIG_FILE"
             fi
           fi
 
