@@ -24,9 +24,6 @@ inputs:
   image_name:
     description: "Name for the Docker image"
     required: true
-  server_name:
-    description: "Server name for subdomain routing (e.g., app.example.com)"
-    required: true
   app_directory:
     description: "Directory containing the Vite app (with package.json and vite.config)"
     required: true
@@ -42,22 +39,6 @@ inputs:
     description: "Node.js version to use for building"
     required: false
     default: "22"
-  nginx_container_name:
-    description: "Name of the nginx proxy container"
-    required: false
-    default: "nginx_proxy"
-  enable_ssl:
-    description: "Enable SSL/HTTPS configuration"
-    required: false
-    default: "false"
-  ssl_cert_path:
-    description: "Path to SSL certificate file in nginx container"
-    required: false
-    default: ""
-  ssl_key_path:
-    description: "Path to SSL private key file in nginx container"
-    required: false
-    default: ""
   docker_network:
     description: "Docker network to connect the container to"
     required: false
@@ -254,22 +235,6 @@ runs:
           echo "🎉 Deployment completed successfully!"
         EOF
 
-    - name: Configure Nginx Reverse Proxy
-      uses: ./configure-nginx-service
-      with:
-        host: ${{ inputs.host }}
-        user: ${{ inputs.user }}
-        port: ${{ inputs.port }}
-        service_name: ${{ inputs.service_name }}
-        container_name: ${{ inputs.container_name }}
-        container_port: ${{ inputs.container_port }}
-        routing_type: "subdomain"
-        server_name: ${{ inputs.server_name }}
-        nginx_container_name: ${{ inputs.nginx_container_name }}
-        enable_ssl: ${{ inputs.enable_ssl }}
-        ssl_cert_path: ${{ inputs.ssl_cert_path }}
-        ssl_key_path: ${{ inputs.ssl_key_path }}
-
     - name: Verify Deployment
       shell: bash
       env:
@@ -306,8 +271,5 @@ runs:
         echo "📋 Deployment Details:"
         echo "   Service: $SERVICE_NAME"
         echo "   Container: $CONTAINER_NAME"
-        if [ "$ENABLE_SSL" = "true" ]; then
-          echo "   URL: https://$SERVER_NAME"
-        else
-          echo "   URL: http://$SERVER_NAME"
-        fi
+        echo ""
+        echo "Next step: Configure nginx reverse proxy using affpro/vps-deploybot/configure-nginx-service"
