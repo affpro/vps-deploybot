@@ -97,68 +97,57 @@ runs:
           exit 1
         fi
 
-        # Create Dockerfile in app directory
-        cat > "$APP_DIR/Dockerfile.vite" <<'DOCKERFILE_EOF'
-# Build stage
-FROM node:NODE_VERSION as builder
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
-COPY . .
-
-# Build the application
-RUN BUILD_COMMAND
-
-# Production stage
-FROM node:NODE_VERSION-alpine
-
-WORKDIR /app
-
-# Install serve globally
-RUN npm install -g serve
-
-# Copy built files from builder stage
-COPY --from=builder /app/DIST_FOLDER ./dist
-
-# Expose port
-EXPOSE CONTAINER_PORT
-
-# Start serve with proper flags
-CMD ["serve", "-s", "dist", "-l", "CONTAINER_PORT", "--no-port-switching", "--no-clipboard"]
-DOCKERFILE_EOF
-
-        # Replace placeholders
-        sed -i.bak "s|NODE_VERSION|$NODE_VERSION|g" "$APP_DIR/Dockerfile.vite"
-        sed -i.bak "s|BUILD_COMMAND|$BUILD_CMD|g" "$APP_DIR/Dockerfile.vite"
-        sed -i.bak "s|DIST_FOLDER|$DIST_FOLDER|g" "$APP_DIR/Dockerfile.vite"
-        sed -i.bak "s|CONTAINER_PORT|$CONTAINER_PORT|g" "$APP_DIR/Dockerfile.vite"
-        rm -f "$APP_DIR/Dockerfile.vite.bak"
+        # Create Dockerfile in app directory using echo commands
+        echo "# Build stage" > "$APP_DIR/Dockerfile.vite"
+        echo "FROM node:${NODE_VERSION} as builder" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Copy package files" >> "$APP_DIR/Dockerfile.vite"
+        echo "COPY package*.json ./" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Install dependencies" >> "$APP_DIR/Dockerfile.vite"
+        echo "RUN npm ci" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Copy source code" >> "$APP_DIR/Dockerfile.vite"
+        echo "COPY . ." >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Build the application" >> "$APP_DIR/Dockerfile.vite"
+        echo "RUN ${BUILD_CMD}" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Production stage" >> "$APP_DIR/Dockerfile.vite"
+        echo "FROM node:${NODE_VERSION}-alpine" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Install serve globally" >> "$APP_DIR/Dockerfile.vite"
+        echo "RUN npm install -g serve" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Copy built files from builder stage" >> "$APP_DIR/Dockerfile.vite"
+        echo "COPY --from=builder /app/${DIST_FOLDER} ./dist" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Expose port" >> "$APP_DIR/Dockerfile.vite"
+        echo "EXPOSE ${CONTAINER_PORT}" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "# Start serve with proper flags" >> "$APP_DIR/Dockerfile.vite"
+        echo "CMD [\"serve\", \"-s\", \"dist\", \"-l\", \"${CONTAINER_PORT}\", \"--no-port-switching\", \"--no-clipboard\"]" >> "$APP_DIR/Dockerfile.vite"
 
         # Create .dockerignore if it doesn't exist
         if [ ! -f "$APP_DIR/.dockerignore" ]; then
-          cat > "$APP_DIR/.dockerignore" <<'DOCKERIGNORE_EOF'
-node_modules
-dist
-.git
-.github
-.env
-.env.local
-.env.*.local
-*.log
-.DS_Store
-coverage
-.vscode
-.idea
-*.md
-Dockerfile*
-DOCKERIGNORE_EOF
+          echo "node_modules" > "$APP_DIR/.dockerignore"
+          echo "dist" >> "$APP_DIR/.dockerignore"
+          echo ".git" >> "$APP_DIR/.dockerignore"
+          echo ".github" >> "$APP_DIR/.dockerignore"
+          echo ".env" >> "$APP_DIR/.dockerignore"
+          echo ".env.local" >> "$APP_DIR/.dockerignore"
+          echo ".env.*.local" >> "$APP_DIR/.dockerignore"
+          echo "*.log" >> "$APP_DIR/.dockerignore"
+          echo ".DS_Store" >> "$APP_DIR/.dockerignore"
+          echo "coverage" >> "$APP_DIR/.dockerignore"
+          echo ".vscode" >> "$APP_DIR/.dockerignore"
+          echo ".idea" >> "$APP_DIR/.dockerignore"
+          echo "*.md" >> "$APP_DIR/.dockerignore"
+          echo "Dockerfile*" >> "$APP_DIR/.dockerignore"
           echo "✅ Created .dockerignore file"
         fi
 
