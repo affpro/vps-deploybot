@@ -163,8 +163,12 @@ runs:
         # Prepare build args for docker build command
         BUILD_ARGS_CMD=""
         if [ -n "$BUILD_ARGS" ]; then
+          echo "📝 Build arguments provided:"
           while IFS= read -r line; do
             if [ -n "$line" ]; then
+              # Extract just the key name (before =) for display
+              ARG_KEY=$(echo "$line" | cut -d= -f1)
+              echo "   - $ARG_KEY"
               BUILD_ARGS_CMD="$BUILD_ARGS_CMD --build-arg $line"
             fi
           done <<< "$BUILD_ARGS"
