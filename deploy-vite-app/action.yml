@@ -39,6 +39,10 @@ inputs:
     description: "Node.js version to use for building"
     required: false
     default: "22"
+  build_args:
+    description: "Docker build arguments (multiline string, e.g., 'ARG1=value1\nARG2=value2')"
+    required: false
+    default: ""
   docker_network:
     description: "Docker network to connect the container to"
     required: false
@@ -56,6 +60,7 @@ runs:
         DIST_FOLDER: "${{ inputs.dist_folder }}"
         CONTAINER_PORT: "${{ inputs.container_port }}"
         NODE_VERSION: "${{ inputs.node_version }}"
+        BUILD_ARGS: "${{ inputs.build_args }}"
       run: |
         set -euo pipefail
 
@@ -65,6 +70,9 @@ runs:
         echo "   Build command: $BUILD_CMD"
         echo "   Dist folder: $DIST_FOLDER"
         echo "   Node version: $NODE_VERSION"
+        if [ -n "$BUILD_ARGS" ]; then
+          echo "   Build args: present"
+        fi
 
         # Check if app directory exists
         if [ ! -d "$APP_DIR" ]; then
@@ -82,6 +90,20 @@ runs:
         echo "# Build stage" > "$APP_DIR/Dockerfile.vite"
         echo "FROM node:${NODE_VERSION} AS builder" >> "$APP_DIR/Dockerfile.vite"
         echo "" >> "$APP_DIR/Dockerfile.vite"
+
+        # Add ARG declarations if build args are provided
+        if [ -n "$BUILD_ARGS" ]; then
+          echo "# Build arguments" >> "$APP_DIR/Dockerfile.vite"
+          echo "$BUILD_ARGS" | while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              # Extract ARG name from "NAME=value" format
+              ARG_NAME=$(echo "$line" | cut -d= -f1)
+              echo "ARG $ARG_NAME" >> "$APP_DIR/Dockerfile.vite"
+            fi
+          done
+          echo "" >> "$APP_DIR/Dockerfile.vite"
+        fi
+
         echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.vite"
         echo "" >> "$APP_DIR/Dockerfile.vite"
         echo "# Copy package files" >> "$APP_DIR/Dockerfile.vite"
@@ -135,7 +157,18 @@ runs:
 
         # Build the image
         echo "🔨 Building Docker image..."
-        docker build -f "$APP_DIR/Dockerfile.vite" -t "$IMAGE_NAME:latest" "$APP_DIR"
+
+        # Prepare build args for docker build command
+        BUILD_ARGS_CMD=""
+        if [ -n "$BUILD_ARGS" ]; then
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              BUILD_ARGS_CMD="$BUILD_ARGS_CMD --build-arg $line"
+            fi
+          done <<< "$BUILD_ARGS"
+        fi
+
+        docker build -f "$APP_DIR/Dockerfile.vite" $BUILD_ARGS_CMD -t "$IMAGE_NAME:latest" "$APP_DIR"
 
         echo "✅ Docker image built successfully: $IMAGE_NAME:latest"
 
