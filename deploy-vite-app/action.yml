@@ -180,6 +180,9 @@ runs:
         cat "$APP_DIR/Dockerfile.vite"
         echo "---"
 
+        echo "🔍 Docker build command will be:"
+        echo "docker build -f $APP_DIR/Dockerfile.vite $BUILD_ARGS_CMD -t $IMAGE_NAME:latest $APP_DIR"
+
         docker build -f "$APP_DIR/Dockerfile.vite" $BUILD_ARGS_CMD -t "$IMAGE_NAME:latest" "$APP_DIR"
 
         echo "✅ Docker image built successfully: $IMAGE_NAME:latest"
