@@ -90,8 +90,10 @@ runs:
         echo "# Build stage" > "$APP_DIR/Dockerfile.vite"
         echo "FROM node:${NODE_VERSION} AS builder" >> "$APP_DIR/Dockerfile.vite"
         echo "" >> "$APP_DIR/Dockerfile.vite"
+        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.vite"
+        echo "" >> "$APP_DIR/Dockerfile.vite"
 
-        # Add ARG declarations if build args are provided
+        # Add ARG and ENV declarations if build args are provided
         if [ -n "$BUILD_ARGS" ]; then
           echo "# Build arguments" >> "$APP_DIR/Dockerfile.vite"
           echo "$BUILD_ARGS" | while IFS= read -r line; do
@@ -99,13 +101,13 @@ runs:
               # Extract ARG name from "NAME=value" format
               ARG_NAME=$(echo "$line" | cut -d= -f1)
               echo "ARG $ARG_NAME" >> "$APP_DIR/Dockerfile.vite"
+              # Convert ARG to ENV so Vite can access it during build
+              echo "ENV $ARG_NAME=\${$ARG_NAME}" >> "$APP_DIR/Dockerfile.vite"
             fi
           done
           echo "" >> "$APP_DIR/Dockerfile.vite"
         fi
 
-        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.vite"
-        echo "" >> "$APP_DIR/Dockerfile.vite"
         echo "# Copy package files" >> "$APP_DIR/Dockerfile.vite"
         echo "COPY package*.json ./" >> "$APP_DIR/Dockerfile.vite"
         echo "COPY yarn.lock* ./" >> "$APP_DIR/Dockerfile.vite"
