@@ -8,9 +8,6 @@ inputs:
   user:
     description: "SSH username"
     required: true
-  ssh_key:
-    description: "SSH private key content"
-    required: true
   port:
     description: "SSH port"
     required: false
@@ -62,14 +59,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup SSH Key and Connection
-      shell: bash
-      run: |
-        mkdir -p ~/.ssh && chmod 700 ~/.ssh
-        printf '%s' "${{ inputs.ssh_key }}" | tr -d '\r' > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" 2>/dev/null >> ~/.ssh/known_hosts || true
-
     - name: Build Docker Image
       shell: bash
       env:

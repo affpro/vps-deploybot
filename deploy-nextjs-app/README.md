@@ -18,6 +18,7 @@ A composite GitHub Action for building and deploying Next.js applications to VPS
 - VPS with Docker installed (use `affpro/vps-deploybot/setup-vps-docker`)
 - Next.js app configured for standalone output (see below)
 - SSH access to VPS with private key
+- SSH key must be configured in workflow before using this action (see usage examples)
 
 ## Next.js Configuration
 
@@ -40,12 +41,18 @@ This enables Next.js to create a minimal production server that includes only th
 ### Basic Example
 
 ```yaml
+- name: Setup SSH Key
+  run: |
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    printf '%s' "${{ secrets.VPS_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+    chmod 600 ~/.ssh/id_rsa
+    ssh-keyscan -H -p 22 "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts || true
+
 - name: Deploy Next.js App
   uses: affpro/vps-deploybot/deploy-nextjs-app@main
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
-    ssh_key: ${{ secrets.VPS_SSH_KEY }}
     service_name: my-nextjs-app
     container_name: nextjs_app
     container_port: 3000
@@ -56,12 +63,18 @@ This enables Next.js to create a minimal production server that includes only th
 ### With Build Arguments
 
 ```yaml
+- name: Setup SSH Key
+  run: |
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    printf '%s' "${{ secrets.VPS_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+    chmod 600 ~/.ssh/id_rsa
+    ssh-keyscan -H -p 22 "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts || true
+
 - name: Deploy Next.js App with Environment Variables
   uses: affpro/vps-deploybot/deploy-nextjs-app@main
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
-    ssh_key: ${{ secrets.VPS_SSH_KEY }}
     service_name: my-nextjs-app
     container_name: nextjs_app
     container_port: 3000
@@ -90,12 +103,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s' "${{ secrets.VPS_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H -p 22 "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts || true
+
       - name: Deploy Next.js Application
         uses: affpro/vps-deploybot/deploy-nextjs-app@main
         with:
           host: ${{ secrets.VPS_HOST }}
           user: ${{ secrets.VPS_USER }}
-          ssh_key: ${{ secrets.VPS_SSH_KEY }}
           service_name: nextjs-app
           container_name: nextjs_app_container
           container_port: 3000
@@ -128,7 +147,6 @@ jobs:
 |-------|-------------|----------|---------|
 | `host` | VPS hostname or IP address | Yes | - |
 | `user` | SSH username | Yes | - |
-| `ssh_key` | SSH private key content | Yes | - |
 | `port` | SSH port | No | `22` |
 | `service_name` | Service name (used for identification) | Yes | - |
 | `container_name` | Docker container name | Yes | - |
@@ -145,7 +163,7 @@ jobs:
 
 ## How It Works
 
-1. **SSH Setup**: Establishes SSH connection to VPS
+1. **SSH Setup**: Must be configured in workflow before using this action (see examples)
 2. **Docker Build**: Creates optimized multi-stage Docker image:
    - **deps stage**: Installs dependencies
    - **builder stage**: Builds Next.js app
