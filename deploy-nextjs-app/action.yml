@@ -1,0 +1,429 @@
+name: Deploy Next.js App
+description: "Build and deploy a Next.js application to VPS with Docker. Supports both standalone and custom server modes."
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  private_key:
+    description: "SSH private key content"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  service_name:
+    description: "Name of the service (used for config file naming)"
+    required: true
+  container_name:
+    description: "Name of the Docker container"
+    required: true
+  container_port:
+    description: "Internal port the container will run on"
+    required: true
+  image_name:
+    description: "Name for the Docker image"
+    required: true
+  app_directory:
+    description: "Directory containing the Next.js app (with package.json and next.config)"
+    required: true
+  build_command:
+    description: "NPM build command"
+    required: false
+    default: "npm run build"
+  start_command:
+    description: "NPM start command"
+    required: false
+    default: "npm start"
+  node_version:
+    description: "Node.js version to use"
+    required: false
+    default: "22"
+  build_args:
+    description: "Docker build arguments (multiline string, e.g., 'ARG1=value1\nARG2=value2')"
+    required: false
+    default: ""
+  docker_network:
+    description: "Docker network to connect the container to"
+    required: false
+    default: "microservices"
+  health_check_enabled:
+    description: "Enable health check after deployment"
+    required: false
+    default: "true"
+  health_check_timeout:
+    description: "Timeout in seconds for health check"
+    required: false
+    default: "60"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup SSH Key and Connection
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh && chmod 700 ~/.ssh
+        printf '%s' "${{ inputs.private_key }}" | tr -d '\r' > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" 2>/dev/null >> ~/.ssh/known_hosts || true
+
+    - name: Build Docker Image
+      shell: bash
+      env:
+        IMAGE_NAME: "${{ inputs.image_name }}"
+        APP_DIR: "${{ inputs.app_directory }}"
+        BUILD_CMD: "${{ inputs.build_command }}"
+        START_CMD: "${{ inputs.start_command }}"
+        CONTAINER_PORT: "${{ inputs.container_port }}"
+        NODE_VERSION: "${{ inputs.node_version }}"
+        BUILD_ARGS: "${{ inputs.build_args }}"
+      run: |
+        set -euo pipefail
+
+        echo "🔨 Building Docker image for Next.js app..."
+        echo "   Image: $IMAGE_NAME"
+        echo "   App directory: $APP_DIR"
+        echo "   Build command: $BUILD_CMD"
+        echo "   Start command: $START_CMD"
+        echo "   Node version: $NODE_VERSION"
+        if [ -n "$BUILD_ARGS" ]; then
+          echo "   Build args: present"
+        fi
+
+        # Check if app directory exists
+        if [ ! -d "$APP_DIR" ]; then
+          echo "❌ App directory not found: $APP_DIR"
+          exit 1
+        fi
+
+        # Check if package.json exists
+        if [ ! -f "$APP_DIR/package.json" ]; then
+          echo "❌ package.json not found in $APP_DIR"
+          exit 1
+        fi
+
+        # Detect package manager
+        PACKAGE_MANAGER="npm"
+        if [ -f "$APP_DIR/yarn.lock" ]; then
+          PACKAGE_MANAGER="yarn"
+        elif [ -f "$APP_DIR/pnpm-lock.yaml" ]; then
+          PACKAGE_MANAGER="pnpm"
+        fi
+        echo "   Package manager: $PACKAGE_MANAGER"
+
+        # Create Dockerfile in app directory
+        echo "📝 Generating Dockerfile for Next.js..."
+
+        # Build stage
+        echo "# Build stage" > "$APP_DIR/Dockerfile.nextjs"
+        echo "FROM node:${NODE_VERSION}-alpine AS deps" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "RUN apk add --no-cache libc6-compat" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+
+        # Add build arguments if provided
+        if [ -n "$BUILD_ARGS" ]; then
+          echo "# Build arguments" >> "$APP_DIR/Dockerfile.nextjs"
+          echo "$BUILD_ARGS" | while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              ARG_NAME=$(echo "$line" | cut -d= -f1)
+              echo "ARG $ARG_NAME" >> "$APP_DIR/Dockerfile.nextjs"
+              echo "ENV $ARG_NAME=\${$ARG_NAME}" >> "$APP_DIR/Dockerfile.nextjs"
+            fi
+          done
+          echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        fi
+
+        # Install dependencies based on package manager
+        echo "# Install dependencies" >> "$APP_DIR/Dockerfile.nextjs"
+        if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+          echo "COPY package.json yarn.lock* ./" >> "$APP_DIR/Dockerfile.nextjs"
+          echo "RUN corepack enable && yarn install --frozen-lockfile" >> "$APP_DIR/Dockerfile.nextjs"
+        elif [ "$PACKAGE_MANAGER" = "pnpm" ]; then
+          echo "COPY package.json pnpm-lock.yaml* ./" >> "$APP_DIR/Dockerfile.nextjs"
+          echo "RUN corepack enable && pnpm install --frozen-lockfile" >> "$APP_DIR/Dockerfile.nextjs"
+        else
+          echo "COPY package.json package-lock.json* ./" >> "$APP_DIR/Dockerfile.nextjs"
+          echo "RUN npm ci" >> "$APP_DIR/Dockerfile.nextjs"
+        fi
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+
+        # Builder stage
+        echo "# Builder stage" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "FROM node:${NODE_VERSION}-alpine AS builder" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "COPY --from=deps /app/node_modules ./node_modules" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "COPY . ." >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+
+        # Copy build args to builder stage if provided
+        if [ -n "$BUILD_ARGS" ]; then
+          echo "# Build arguments for builder stage" >> "$APP_DIR/Dockerfile.nextjs"
+          echo "$BUILD_ARGS" | while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              ARG_NAME=$(echo "$line" | cut -d= -f1)
+              echo "ARG $ARG_NAME" >> "$APP_DIR/Dockerfile.nextjs"
+              echo "ENV $ARG_NAME=\${$ARG_NAME}" >> "$APP_DIR/Dockerfile.nextjs"
+            fi
+          done
+          echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        fi
+
+        # Build the application
+        echo "# Build the Next.js app" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "ENV NEXT_TELEMETRY_DISABLED 1" >> "$APP_DIR/Dockerfile.nextjs"
+        if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+          echo "RUN yarn build" >> "$APP_DIR/Dockerfile.nextjs"
+        elif [ "$PACKAGE_MANAGER" = "pnpm" ]; then
+          echo "RUN pnpm build" >> "$APP_DIR/Dockerfile.nextjs"
+        else
+          echo "RUN npm run build" >> "$APP_DIR/Dockerfile.nextjs"
+        fi
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+
+        # Production stage
+        echo "# Production stage" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "FROM node:${NODE_VERSION}-alpine AS runner" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "WORKDIR /app" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "ENV NODE_ENV production" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "ENV NEXT_TELEMETRY_DISABLED 1" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "ENV PORT ${CONTAINER_PORT}" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "RUN addgroup --system --gid 1001 nodejs" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "RUN adduser --system --uid 1001 nextjs" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+
+        # Copy necessary files for standalone build
+        echo "# Copy built application" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "COPY --from=builder /app/public ./public" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "# Copy standalone output if using standalone mode" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "USER nextjs" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "EXPOSE ${CONTAINER_PORT}" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "" >> "$APP_DIR/Dockerfile.nextjs"
+        echo "CMD [\"node\", \"server.js\"]" >> "$APP_DIR/Dockerfile.nextjs"
+
+        # Create .dockerignore if it doesn't exist
+        if [ ! -f "$APP_DIR/.dockerignore" ]; then
+          echo "📝 Creating .dockerignore file..."
+          echo "node_modules" > "$APP_DIR/.dockerignore"
+          echo ".next" >> "$APP_DIR/.dockerignore"
+          echo ".git" >> "$APP_DIR/.dockerignore"
+          echo ".github" >> "$APP_DIR/.dockerignore"
+          echo ".env" >> "$APP_DIR/.dockerignore"
+          echo ".env*.local" >> "$APP_DIR/.dockerignore"
+          echo "*.log" >> "$APP_DIR/.dockerignore"
+          echo ".DS_Store" >> "$APP_DIR/.dockerignore"
+          echo "coverage" >> "$APP_DIR/.dockerignore"
+          echo ".vscode" >> "$APP_DIR/.dockerignore"
+          echo ".idea" >> "$APP_DIR/.dockerignore"
+          echo "*.md" >> "$APP_DIR/.dockerignore"
+          echo "Dockerfile*" >> "$APP_DIR/.dockerignore"
+          echo "README.md" >> "$APP_DIR/.dockerignore"
+          echo ".vercel" >> "$APP_DIR/.dockerignore"
+          echo "out" >> "$APP_DIR/.dockerignore"
+          echo "✅ Created .dockerignore file"
+        fi
+
+        # Prepare build args for docker build command
+        BUILD_ARGS_CMD=""
+        if [ -n "$BUILD_ARGS" ]; then
+          echo "📝 Build arguments provided:"
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              ARG_KEY=$(echo "$line" | cut -d= -f1)
+              echo "   - $ARG_KEY"
+              BUILD_ARGS_CMD="$BUILD_ARGS_CMD --build-arg $line"
+            fi
+          done <<< "$BUILD_ARGS"
+        fi
+
+        # Show the generated Dockerfile for debugging
+        echo "📄 Generated Dockerfile:"
+        echo "---"
+        cat "$APP_DIR/Dockerfile.nextjs"
+        echo "---"
+
+        # Build the image
+        echo "🔨 Building Docker image..."
+        docker build -f "$APP_DIR/Dockerfile.nextjs" $BUILD_ARGS_CMD -t "$IMAGE_NAME:latest" "$APP_DIR"
+
+        echo "✅ Docker image built successfully: $IMAGE_NAME:latest"
+
+    - name: Save and Transfer Docker Image
+      shell: bash
+      env:
+        IMAGE_NAME: "${{ inputs.image_name }}"
+      run: |
+        set -euo pipefail
+
+        echo "💾 Saving Docker image to tar.gz..."
+        docker save "$IMAGE_NAME:latest" | gzip > "/tmp/${IMAGE_NAME}.tar.gz"
+
+        echo "📦 Image size: $(du -h /tmp/${IMAGE_NAME}.tar.gz | cut -f1)"
+
+        echo "📤 Transferring image to VPS..."
+        scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
+          "/tmp/${IMAGE_NAME}.tar.gz" \
+          "${{ inputs.user }}@${{ inputs.host }}:/tmp/${IMAGE_NAME}.tar.gz"
+
+        echo "✅ Image transferred successfully"
+
+        # Cleanup local tar.gz
+        rm -f "/tmp/${IMAGE_NAME}.tar.gz"
+
+    - name: Deploy Container on VPS
+      shell: bash
+      env:
+        IMAGE_NAME: "${{ inputs.image_name }}"
+        CONTAINER_NAME: "${{ inputs.container_name }}"
+        CONTAINER_PORT: "${{ inputs.container_port }}"
+        DOCKER_NETWORK: "${{ inputs.docker_network }}"
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "IMAGE_NAME='$IMAGE_NAME' CONTAINER_NAME='$CONTAINER_NAME' CONTAINER_PORT='$CONTAINER_PORT' DOCKER_NETWORK='$DOCKER_NETWORK' bash -s" <<'EOF'
+          set -euo pipefail
+
+          echo "🚀 Deploying Next.js container: $CONTAINER_NAME"
+
+          # Load the image
+          echo "📦 Loading Docker image..."
+          sudo docker load < "/tmp/${IMAGE_NAME}.tar.gz"
+
+          # Stop and remove old container if it exists
+          if sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+            echo "🛑 Stopping old container..."
+            sudo docker stop "$CONTAINER_NAME" || true
+            echo "🗑 Removing old container..."
+            sudo docker rm "$CONTAINER_NAME" || true
+          fi
+
+          # Create Docker network if it doesn't exist
+          if ! sudo docker network ls --format '{{.Name}}' | grep -q "^${DOCKER_NETWORK}$"; then
+            echo "🌐 Creating Docker network: $DOCKER_NETWORK"
+            sudo docker network create "$DOCKER_NETWORK"
+          fi
+
+          # Run new container
+          echo "▶️ Starting new Next.js container..."
+          sudo docker run -d \
+            --name "$CONTAINER_NAME" \
+            --network "$DOCKER_NETWORK" \
+            --restart unless-stopped \
+            -p "127.0.0.1:${CONTAINER_PORT}:${CONTAINER_PORT}" \
+            -e PORT="${CONTAINER_PORT}" \
+            "${IMAGE_NAME}:latest"
+
+          # Wait for container to be healthy
+          echo "⏳ Waiting for container to start..."
+          for i in $(seq 1 60); do
+            container_status=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "none")
+            if [ "$container_status" = "running" ]; then
+              echo "✅ Container $CONTAINER_NAME is running"
+              break
+            elif [ "$container_status" = "exited" ]; then
+              echo "❌ Container exited unexpectedly. Logs:"
+              sudo docker logs --tail=50 "$CONTAINER_NAME" || true
+              exit 1
+            fi
+            echo "🔄 Waiting for container... ($i/60) Status: $container_status"
+            sleep 2
+          done
+
+          # Check container status
+          if sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+            echo "✅ Container started successfully"
+            echo "📊 Container status:"
+            sudo docker ps --filter "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+            echo "📝 Container startup logs:"
+            sudo docker logs --tail=30 "$CONTAINER_NAME" || true
+          else
+            echo "❌ Container failed to start"
+            echo "📝 Container logs:"
+            sudo docker logs "$CONTAINER_NAME"
+            exit 1
+          fi
+
+          # Cleanup transferred image file
+          echo "🧹 Cleaning up transferred image file..."
+          rm -f "/tmp/${IMAGE_NAME}.tar.gz"
+
+          # Remove old images (keep latest)
+          echo "🧹 Cleaning up old Docker images..."
+          OLD_IMAGES=$(sudo docker images "$IMAGE_NAME" --format "{{.ID}} {{.Tag}}" | grep -v "latest" | awk '{print $1}' || true)
+          if [ -n "$OLD_IMAGES" ]; then
+            echo "$OLD_IMAGES" | xargs -r sudo docker rmi -f || true
+          fi
+
+          echo "🎉 Deployment completed successfully!"
+        EOF
+
+    - name: Health Check
+      shell: bash
+      if: ${{ inputs.health_check_enabled == 'true' }}
+      env:
+        CONTAINER_NAME: "${{ inputs.container_name }}"
+        CONTAINER_PORT: "${{ inputs.container_port }}"
+        TIMEOUT: "${{ inputs.health_check_timeout }}"
+      run: |
+        echo "🏥 Performing health check on Next.js application..."
+
+        for i in $(seq 1 $TIMEOUT); do
+          echo "🔄 Health check attempt $i/$TIMEOUT"
+
+          response=$(ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+            -o StrictHostKeyChecking=no \
+            "${{ inputs.user }}@${{ inputs.host }}" \
+            "curl -f -s -w 'HTTP_CODE:%{http_code}' http://127.0.0.1:${CONTAINER_PORT}/ 2>/dev/null || echo 'FAILED'")
+
+          if echo "$response" | grep -q "HTTP_CODE:200"; then
+            echo "✅ Health check passed"
+            echo "🎉 Next.js application is healthy and ready!"
+            exit 0
+          elif echo "$response" | grep -q "HTTP_CODE:"; then
+            http_code=$(echo "$response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+            echo "⚠️ Service responding with HTTP $http_code"
+          else
+            echo "❌ No response from service"
+          fi
+
+          sleep 2
+        done
+
+        echo "❌ Health check failed after $TIMEOUT attempts"
+        echo "🔍 Final container logs:"
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "sudo docker logs --tail=100 $CONTAINER_NAME"
+        exit 1
+
+    - name: Deployment Summary
+      shell: bash
+      env:
+        SERVICE_NAME: "${{ inputs.service_name }}"
+        CONTAINER_NAME: "${{ inputs.container_name }}"
+        CONTAINER_PORT: "${{ inputs.container_port }}"
+      run: |
+        echo ""
+        echo "🎉 Next.js app deployed successfully!"
+        echo "📋 Deployment Details:"
+        echo "   Service: $SERVICE_NAME"
+        echo "   Container: $CONTAINER_NAME"
+        echo "   Port: $CONTAINER_PORT"
+        echo ""
+        echo "Next steps:"
+        echo "1. Configure nginx reverse proxy using affpro/vps-deploybot/configure-nginx-service"
+        echo "2. (Optional) Set up SSL certificates using affpro/vps-deploybot/setup-ssl-certificates"
