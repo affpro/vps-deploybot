@@ -45,7 +45,7 @@ This enables Next.js to create a minimal production server that includes only th
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
-    private_key: ${{ secrets.VPS_SSH_KEY }}
+    ssh_key: ${{ secrets.VPS_SSH_KEY }}
     service_name: my-nextjs-app
     container_name: nextjs_app
     container_port: 3000
@@ -61,7 +61,7 @@ This enables Next.js to create a minimal production server that includes only th
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
-    private_key: ${{ secrets.VPS_SSH_KEY }}
+    ssh_key: ${{ secrets.VPS_SSH_KEY }}
     service_name: my-nextjs-app
     container_name: nextjs_app
     container_port: 3000
@@ -95,7 +95,7 @@ jobs:
         with:
           host: ${{ secrets.VPS_HOST }}
           user: ${{ secrets.VPS_USER }}
-          private_key: ${{ secrets.VPS_SSH_KEY }}
+          ssh_key: ${{ secrets.VPS_SSH_KEY }}
           service_name: nextjs-app
           container_name: nextjs_app_container
           container_port: 3000
@@ -114,7 +114,7 @@ jobs:
         with:
           host: ${{ secrets.VPS_HOST }}
           user: ${{ secrets.VPS_USER }}
-          private_key: ${{ secrets.VPS_SSH_KEY }}
+          ssh_key: ${{ secrets.VPS_SSH_KEY }}
           service_name: nextjs-app
           container_name: nextjs_app_container
           container_port: 3000
@@ -128,7 +128,7 @@ jobs:
 |-------|-------------|----------|---------|
 | `host` | VPS hostname or IP address | Yes | - |
 | `user` | SSH username | Yes | - |
-| `private_key` | SSH private key content | Yes | - |
+| `ssh_key` | SSH private key content | Yes | - |
 | `port` | SSH port | No | `22` |
 | `service_name` | Service name (used for identification) | Yes | - |
 | `container_name` | Docker container name | Yes | - |

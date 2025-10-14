@@ -8,7 +8,7 @@ inputs:
   user:
     description: "SSH username"
     required: true
-  private_key:
+  ssh_key:
     description: "SSH private key content"
     required: true
   port:
@@ -66,7 +66,7 @@ runs:
       shell: bash
       run: |
         mkdir -p ~/.ssh && chmod 700 ~/.ssh
-        printf '%s' "${{ inputs.private_key }}" | tr -d '\r' > ~/.ssh/id_rsa
+        printf '%s' "${{ inputs.ssh_key }}" | tr -d '\r' > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H -p "${{ inputs.port }}" "${{ inputs.host }}" 2>/dev/null >> ~/.ssh/known_hosts || true
 
