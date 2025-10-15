@@ -152,8 +152,8 @@ runs:
           echo "   Server: $FINAL_SERVER_NAME"
           echo "   Location: $FINAL_LOCATION"
 
-          # Create the configuration file using echo to avoid heredoc issues
-          sudo bash -c "echo 'upstream ${SERVICE_NAME}_backend { server $CONTAINER_NAME:$CONTAINER_PORT; }' > $CONFIG_FILE"
+          # Create the configuration file using variables for runtime DNS resolution
+          sudo bash -c "echo '# Service: $SERVICE_NAME' > $CONFIG_FILE"
           sudo bash -c "echo 'server {' >> $CONFIG_FILE"
           sudo bash -c "echo '    listen 80;' >> $CONFIG_FILE"
           sudo bash -c "echo '    server_name $FINAL_SERVER_NAME;' >> $CONFIG_FILE"
@@ -161,7 +161,8 @@ runs:
           sudo bash -c "echo '    add_header X-Content-Type-Options nosniff;' >> $CONFIG_FILE"
           sudo bash -c "echo '    add_header X-XSS-Protection \"1; mode=block\";' >> $CONFIG_FILE"
           sudo bash -c "echo '    location $FINAL_LOCATION {' >> $CONFIG_FILE"
-          sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend$PROXY_PASS_PATH;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;' >> $CONFIG_FILE"
+          sudo bash -c "echo '        proxy_pass \$backend_upstream$PROXY_PASS_PATH;' >> $CONFIG_FILE"
           sudo bash -c "echo '        proxy_http_version 1.1;' >> $CONFIG_FILE"
           sudo bash -c "echo '        proxy_set_header Upgrade \$http_upgrade;' >> $CONFIG_FILE"
           sudo bash -c "echo '        proxy_set_header Connection '"'"'upgrade'"'"';' >> $CONFIG_FILE"
@@ -182,7 +183,8 @@ runs:
           # Add health check location for path-based routing
           if [ "$ROUTING_TYPE" = "path" ]; then
             sudo bash -c "echo '    location ${PATH_PREFIX}/health {' >> $CONFIG_FILE"
-            sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend/health;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_pass \$backend_upstream/health;' >> $CONFIG_FILE"
             sudo bash -c "echo '        proxy_set_header Host \$host;' >> $CONFIG_FILE"
             sudo bash -c "echo '        proxy_set_header X-Real-IP \$remote_addr;' >> $CONFIG_FILE"
             sudo bash -c "echo '        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;' >> $CONFIG_FILE"
@@ -206,7 +208,8 @@ runs:
             sudo bash -c "echo '    add_header X-XSS-Protection \"1; mode=block\";' >> $CONFIG_FILE"
             sudo bash -c "echo '    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;' >> $CONFIG_FILE"
             sudo bash -c "echo '    location $FINAL_LOCATION {' >> $CONFIG_FILE"
-            sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend$PROXY_PASS_PATH;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;' >> $CONFIG_FILE"
+            sudo bash -c "echo '        proxy_pass \$backend_upstream$PROXY_PASS_PATH;' >> $CONFIG_FILE"
             sudo bash -c "echo '        proxy_http_version 1.1;' >> $CONFIG_FILE"
             sudo bash -c "echo '        proxy_set_header Upgrade \$http_upgrade;' >> $CONFIG_FILE"
             sudo bash -c "echo '        proxy_set_header Connection '"'"'upgrade'"'"';' >> $CONFIG_FILE"
@@ -227,7 +230,8 @@ runs:
             # Add SSL health check for path-based routing
             if [ "$ROUTING_TYPE" = "path" ]; then
               sudo bash -c "echo '    location ${PATH_PREFIX}/health {' >> $CONFIG_FILE"
-              sudo bash -c "echo '        proxy_pass http://${SERVICE_NAME}_backend/health;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;' >> $CONFIG_FILE"
+              sudo bash -c "echo '        proxy_pass \$backend_upstream/health;' >> $CONFIG_FILE"
               sudo bash -c "echo '        proxy_set_header Host \$host;' >> $CONFIG_FILE"
               sudo bash -c "echo '        proxy_set_header X-Real-IP \$remote_addr;' >> $CONFIG_FILE"
               sudo bash -c "echo '        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;' >> $CONFIG_FILE"
