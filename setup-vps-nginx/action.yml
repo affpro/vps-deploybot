@@ -178,10 +178,16 @@ runs:
 
           # Test nginx configuration
           echo "🔍 Testing nginx configuration..."
-          if sudo docker exec "$NGINX_CONTAINER" nginx -t; then
+          if sudo docker exec "$NGINX_CONTAINER" nginx -t 2>&1; then
             echo "✅ Nginx configuration is valid"
           else
             echo "❌ Nginx configuration test failed"
+            echo "📋 Nginx configuration details:"
+            sudo docker exec "$NGINX_CONTAINER" cat /etc/nginx/nginx.conf || true
+            echo "📁 Sites-enabled directory contents:"
+            sudo docker exec "$NGINX_CONTAINER" ls -la /etc/nginx/sites-enabled/ || true
+            echo "📝 Container logs:"
+            sudo docker logs --tail=20 "$NGINX_CONTAINER" || true
             exit 1
           fi
 
