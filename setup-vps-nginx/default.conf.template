@@ -1,2 +1,5 @@
-# Default configuration - modify as needed
-# This file will be updated by configure-nginx-service action
+# Default placeholder configuration
+# Services will be added by configure-nginx-service action
+
+# This file intentionally left minimal to allow dynamic service configuration
+# Without this file, nginx would fail if sites-enabled directory is empty
