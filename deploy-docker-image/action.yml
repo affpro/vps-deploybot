@@ -75,7 +75,8 @@ runs:
         MAIN_COMMAND: "${{ inputs.main_command }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR \
+          -o ServerAliveInterval=60 -o ServerAliveCountMax=10 -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
           "IMAGE_ARCHIVE='$IMAGE_ARCHIVE' CONTAINER_NAME='$CONTAINER_NAME' DOCKER_RUN_ARGS='$DOCKER_RUN_ARGS' STARTUP_COMMANDS='$STARTUP_COMMANDS' MAIN_COMMAND='$MAIN_COMMAND' bash -s" << 'EOF'
           set -euo pipefail
@@ -89,8 +90,24 @@ runs:
           # Extract image name from archive
           IMAGE_NAME=$(echo "$IMAGE_ARCHIVE" | sed 's/\.tar\.gz$//')
 
+          # Check if archive exists and get size
+          if [ ! -f "$IMAGE_ARCHIVE" ]; then
+            echo "❌ Image archive not found: $IMAGE_ARCHIVE"
+            echo "📁 Files in current directory:"
+            ls -lah
+            exit 1
+          fi
+
           echo "📦 Loading Docker image from archive..."
-          sudo docker load < "$IMAGE_ARCHIVE"
+          echo "   Archive: $IMAGE_ARCHIVE"
+          echo "   Size: $(du -h "$IMAGE_ARCHIVE" | cut -f1)"
+
+          if ! sudo docker load < "$IMAGE_ARCHIVE" 2>&1; then
+            echo "❌ Failed to load Docker image"
+            echo "📋 Archive info:"
+            file "$IMAGE_ARCHIVE"
+            exit 1
+          fi
 
           # Stop and remove existing container if it exists
           if sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
