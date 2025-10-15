@@ -87,6 +87,18 @@ runs:
           sudo mv /tmp/nginx.conf.template "$NGINX_CONFIG_DIR/nginx.conf"
           sudo mv /tmp/default.conf.template "$NGINX_SITES_DIR/default.conf"
 
+          # Clean up old-style service configs that use upstream blocks
+          echo "🧹 Checking for old-style service configurations..."
+          for conf_file in "$NGINX_SITES_DIR"/service-*.conf; do
+            if [ -f "$conf_file" ] && grep -q "^upstream " "$conf_file"; then
+              echo "⚠️  Found old-style config: $(basename "$conf_file")"
+              echo "    This config uses 'upstream' blocks which cause startup failures."
+              echo "    Please recreate this service using configure-nginx-service action."
+              echo "    For now, backing up and removing: $conf_file"
+              sudo mv "$conf_file" "${conf_file}.old" || true
+            fi
+          done
+
           # Stop and remove existing nginx container if it exists
           if sudo docker ps -a --format '{{.Names}}' | grep -q "^${NGINX_CONTAINER}$"; then
             echo "🛑 Stopping existing nginx container..."
