@@ -195,9 +195,25 @@ runs:
 
           # Add SSL configuration if enabled
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
+            # Verify SSL certificate files exist before adding configuration
+            if ! sudo test -f "$SSL_CERT_PATH"; then
+              echo "⚠️  SSL certificate file not found: $SSL_CERT_PATH"
+              echo "   Skipping SSL configuration. Certificate must be provisioned first."
+              echo "   Hint: Use setup-vps-letsencrypt action to provision certificates."
+              ENABLE_SSL="false"
+            elif ! sudo test -f "$SSL_KEY_PATH"; then
+              echo "⚠️  SSL private key file not found: $SSL_KEY_PATH"
+              echo "   Skipping SSL configuration. Certificate must be provisioned first."
+              echo "   Hint: Use setup-vps-letsencrypt action to provision certificates."
+              ENABLE_SSL="false"
+            fi
+          fi
+
+          if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
             sudo bash -c "echo '}' >> $CONFIG_FILE"
             sudo bash -c "echo 'server {' >> $CONFIG_FILE"
-            sudo bash -c "echo '    listen 443 ssl http2;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    listen 443 ssl;' >> $CONFIG_FILE"
+            sudo bash -c "echo '    http2 on;' >> $CONFIG_FILE"
             sudo bash -c "echo '    server_name $FINAL_SERVER_NAME;' >> $CONFIG_FILE"
             sudo bash -c "echo '    ssl_certificate $SSL_CERT_PATH;' >> $CONFIG_FILE"
             sudo bash -c "echo '    ssl_certificate_key $SSL_KEY_PATH;' >> $CONFIG_FILE"
