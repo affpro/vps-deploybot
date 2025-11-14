@@ -103,8 +103,15 @@ runs:
           # Install certbot-dns-hetzner plugin
           if ! python3 -c "import certbot_dns_hetzner" 2>/dev/null; then
             echo "📥 Installing certbot-dns-hetzner plugin..."
-            sudo pip3 install --upgrade certbot-dns-hetzner
-            echo "✅ certbot-dns-hetzner plugin installed"
+            # Try with --break-system-packages for Ubuntu 24.04+ (PEP 668 enforcement)
+            if sudo pip3 install --upgrade certbot-dns-hetzner 2>/dev/null; then
+              echo "✅ certbot-dns-hetzner plugin installed"
+            elif sudo pip3 install --upgrade --break-system-packages certbot-dns-hetzner 2>/dev/null; then
+              echo "✅ certbot-dns-hetzner plugin installed (with system-packages override)"
+            else
+              echo "❌ Failed to install certbot-dns-hetzner plugin"
+              exit 1
+            fi
           else
             echo "✅ certbot-dns-hetzner plugin already installed"
           fi
