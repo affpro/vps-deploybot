@@ -85,19 +85,25 @@ runs:
           fi
 
           # Install certbot and Hetzner DNS plugin
-          echo "📦 Installing certbot and Hetzner DNS plugin..."
+          echo "📦 Installing certbot and dependencies..."
           if ! command -v certbot &> /dev/null; then
             sudo apt-get update -y
-            sudo apt-get install -y certbot python3-pip
+            sudo apt-get install -y certbot python3-pip python3-dev
             echo "✅ Certbot installed"
           else
             echo "✅ Certbot already installed: $(certbot --version | head -n1)"
           fi
 
+          # Ensure pip3 is available
+          if ! command -v pip3 &> /dev/null; then
+            echo "⚠️  pip3 not found, installing python3-pip..."
+            sudo apt-get install -y python3-pip
+          fi
+
           # Install certbot-dns-hetzner plugin
           if ! python3 -c "import certbot_dns_hetzner" 2>/dev/null; then
             echo "📥 Installing certbot-dns-hetzner plugin..."
-            sudo pip3 install certbot-dns-hetzner
+            sudo pip3 install --upgrade certbot-dns-hetzner
             echo "✅ certbot-dns-hetzner plugin installed"
           else
             echo "✅ certbot-dns-hetzner plugin already installed"
