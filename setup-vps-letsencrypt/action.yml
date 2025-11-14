@@ -119,9 +119,7 @@ runs:
           # Create Hetzner DNS credentials file
           HETZNER_CREDS="$CERT_DIR/hetzner_dns_credentials.ini"
           echo "🔑 Creating Hetzner DNS credentials file"
-          sudo bash -c "cat > '$HETZNER_CREDS' << 'EOF'
-dns_hetzner_token = $HETZNER_DNS_TOKEN
-EOF"
+          printf "dns_hetzner_token = %s\n" "$HETZNER_DNS_TOKEN" | sudo tee "$HETZNER_CREDS" > /dev/null
           sudo chmod 600 "$HETZNER_CREDS"
           echo "✅ Credentials file secured with 600 permissions"
 
