@@ -91,6 +91,10 @@ runs:
           sudo mv /tmp/nginx.conf.template "$NGINX_CONFIG_DIR/nginx.conf"
           sudo mv /tmp/acme-challenge.conf.template "$NGINX_SITES_DIR/00-acme-challenge.conf"
           sudo mv /tmp/default.conf.template "$NGINX_SITES_DIR/default.conf"
+
+          # Remove old default.conf if it exists (legacy configuration)
+          sudo rm -f "$NGINX_SITES_DIR/default.conf.old" || true
+
           echo "✅ ACME challenge configuration installed"
 
           # Clean up old-style service configs that use upstream blocks
