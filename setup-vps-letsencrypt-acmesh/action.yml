@@ -84,6 +84,16 @@ runs:
             sudo mkdir -p "$CERT_DIR"
           fi
 
+          # Install socat and curl (required for standalone HTTP-01 challenge)
+          echo "📦 Installing dependencies for HTTP-01 validation..."
+          if ! command -v socat &> /dev/null; then
+            sudo apt-get update -y > /dev/null 2>&1
+            sudo apt-get install -y socat curl > /dev/null 2>&1
+            echo "✅ socat and curl installed"
+          else
+            echo "✅ socat already installed"
+          fi
+
           # Install acme.sh if not already installed
           ACME_DIR="$HOME/.acme.sh"
           if [ ! -d "$ACME_DIR" ]; then
@@ -179,6 +189,7 @@ runs:
             if $ACME_BIN --issue \
               $FORCE_FLAG \
               --standalone \
+              --debug \
               --server letsencrypt \
               $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
@@ -186,7 +197,7 @@ runs:
               echo "❌ Certificate provisioning failed"
               echo ""
               echo "=== Debug Log ==="
-              tail -50 /tmp/acme_debug.log || true
+              tail -100 /tmp/acme_debug.log || true
               echo "=== End Debug Log ==="
               exit 1
             fi
