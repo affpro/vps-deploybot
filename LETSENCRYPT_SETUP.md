@@ -35,10 +35,24 @@ The deployment workflows now use the **recommended `setup-vps-letsencrypt-acmesh
 ### Step 1: Prepare Your VPS
 
 The acme.sh action uses HTTP-01 validation, which requires:
-- Port 80 (HTTP) to be accessible on your VPS
-- No other service running on port 80 during certificate provisioning
-- The VPS must be reachable from the internet on port 80
-- The action automatically installs `socat` (required for HTTP-01 webserver) if not present
+- **Port 80 (HTTP) must be accessible** from the internet on your VPS
+- **No other service running on port 80** during certificate provisioning (nginx, Apache, etc. must be stopped)
+- **Domain DNS must point to your VPS** - Let's Encrypt will connect to http://yourdomain.com to validate
+- The action automatically installs `socat` and `curl` (required for HTTP-01 webserver) if not present
+
+**Pre-flight checks:**
+```bash
+# 1. Check if port 80 is open in your firewall
+sudo ufw status | grep 80
+
+# 2. Check DNS resolution
+nslookup yourdomain.com
+# Should return your VPS public IP
+
+# 3. Check if port 80 is already in use
+sudo netstat -tulpn | grep :80
+# Or: sudo lsof -i :80
+```
 
 ### Step 2: Ensure GitHub Secrets Are Set
 
@@ -159,30 +173,49 @@ sudo apt-get install -y socat curl
 # Try certificate provisioning again
 ```
 
-### Certificate provisioning fails with connection error
+### Certificate provisioning fails with "validation failed" or connection errors
 
-**Possible causes and solutions:**
+**The action provides diagnostics in the error output. Look for:**
 
-1. **Port 80 not accessible** - HTTP-01 validation requires port 80 to be open
+1. **Port 80 status** - The action will show if port 80 is listening
+   - Solution: `sudo ufw allow 80` to allow port 80
+   - Or configure your firewall to accept HTTP traffic
+
+2. **Services on port 80** - Shows what's using port 80 if blocked
    ```bash
-   # Check if port 80 is accessible from internet
-   curl -v http://example.com/.well-known/acme-challenge/test
-   ```
-   - Verify UFW allows port 80: `sudo ufw status | grep 80`
-   - If blocked, allow it temporarily: `sudo ufw allow 80`
-   - Or configure VPS firewall to allow port 80
+   # Stop the service temporarily
+   sudo systemctl stop nginx    # or apache2, httpd, etc.
 
-2. **Another service on port 80** - A web server may be running on port 80
-   - Check running services: `sudo netstat -tulpn | grep :80`
-   - Temporarily stop the service during provisioning
-   - Or use a different challenge type (requires DNS API integration)
+   # Run the action to provision certificate
 
-3. **Domain DNS not pointing to VPS** - DNS must resolve to your VPS IP
-   ```bash
-   # Check DNS resolution
-   nslookup example.com
-   # Should show your VPS public IP
+   # Restart the service
+   sudo systemctl start nginx
    ```
+
+3. **acme.sh detailed log** - The action shows the detailed log from acme.sh
+   - Log location displayed: `~/.acme.sh/{domain}/{domain}.log`
+   - Manually check: `cat ~/.acme.sh/example.com/example.com.log`
+
+**Common error messages and solutions:**
+
+- `"Connection refused"` - Port 80 blocked by firewall or service
+  ```bash
+  sudo ufw allow 80
+  ```
+
+- `"Timeout waiting for validation"` - DNS not pointing to VPS or port not accessible
+  ```bash
+  # Verify DNS
+  dig example.com +short
+  # Should return your VPS public IP
+  ```
+
+- `"http validation failed"` - Let's Encrypt can't reach your VPS
+  ```bash
+  # Test accessibility from outside
+  curl -v http://example.com/.well-known/acme-challenge/test
+  # Should show HTTP 404 (not a certificate error)
+  ```
 
 ### Certificate files not found after provisioning
 
