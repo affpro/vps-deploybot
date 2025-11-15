@@ -34,24 +34,34 @@ The deployment workflows now use the **recommended `setup-vps-letsencrypt-acmesh
 
 ### Step 1: Prepare Your VPS
 
+**IMPORTANT: Port 80 must be free!**
+
 The acme.sh action uses HTTP-01 validation, which requires:
 - **Port 80 (HTTP) must be accessible** from the internet on your VPS
-- **No other service running on port 80** during certificate provisioning (nginx, Apache, etc. must be stopped)
+- **NO other service running on port 80** during certificate provisioning (nginx, Apache, Docker, etc. must be stopped)
 - **Domain DNS must point to your VPS** - Let's Encrypt will connect to http://yourdomain.com to validate
 - The action automatically installs `socat` and `curl` (required for HTTP-01 webserver) if not present
 
 **Pre-flight checks:**
 ```bash
-# 1. Check if port 80 is open in your firewall
-sudo ufw status | grep 80
+# 1. Check if port 80 is already in use
+sudo netstat -tulpn | grep :80
+# Or: sudo ss -tulpn | grep :80
 
-# 2. Check DNS resolution
+# If port 80 is in use, stop the service first!
+sudo systemctl stop nginx    # or: apache2, docker, etc.
+
+# 2. Verify port 80 is now free
+sudo netstat -tulpn | grep :80
+# Should show no output
+
+# 3. Check if port 80 is open in your firewall
+sudo ufw status | grep 80
+# Should allow port 80
+
+# 4. Check DNS resolution
 nslookup yourdomain.com
 # Should return your VPS public IP
-
-# 3. Check if port 80 is already in use
-sudo netstat -tulpn | grep :80
-# Or: sudo lsof -i :80
 ```
 
 ### Step 2: Ensure GitHub Secrets Are Set
@@ -173,24 +183,43 @@ sudo apt-get install -y socat curl
 # Try certificate provisioning again
 ```
 
+### ⚠️ "Port 80 is already in use" or "tcp port 80 is already used by"
+
+**This is the most common issue. A web server is already running on port 80.**
+
+The action will show which service is using it:
+```
+⚠️  Port 80 IS IN USE
+- Services/processes on port 80:
+  nginx (PID 1234)
+```
+
+**Solution: Temporarily stop the service:**
+
+```bash
+# Stop nginx (or apache2, docker, etc.)
+sudo systemctl stop nginx
+
+# Run the action to provision certificate
+
+# Restart the service
+sudo systemctl start nginx
+```
+
+**Alternative: Use a different domain/subdomain first**
+If you can't stop the service, you can:
+1. Provision the certificate on a temporary domain/subdomain with port 80 available
+2. Then use that certificate for your main domain
+
+---
+
 ### Certificate provisioning fails with "validation failed" or connection errors
 
 **The action provides diagnostics in the error output. Look for:**
 
-1. **Port 80 status** - The action will show if port 80 is listening
-   - Solution: `sudo ufw allow 80` to allow port 80
-   - Or configure your firewall to accept HTTP traffic
-
-2. **Services on port 80** - Shows what's using port 80 if blocked
-   ```bash
-   # Stop the service temporarily
-   sudo systemctl stop nginx    # or apache2, httpd, etc.
-
-   # Run the action to provision certificate
-
-   # Restart the service
-   sudo systemctl start nginx
-   ```
+1. **Port 80 status** - Shows if port 80 is listening or in use
+   - If in use: Stop the service (see above)
+   - If not listening: `sudo ufw allow 80` to allow port 80 in firewall
 
 3. **acme.sh detailed log** - The action shows the detailed log from acme.sh
    - Log location displayed: `~/.acme.sh/{domain}/{domain}.log`
