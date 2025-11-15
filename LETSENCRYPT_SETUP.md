@@ -62,7 +62,7 @@ Add this step to your GitHub Actions workflow:
 ```yaml
 - name: Provision SSL Certificate (acme.sh)
   id: ssl
-  uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@v0.0.118
+  uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@v0.0.119
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
@@ -78,7 +78,7 @@ The acme.sh action outputs certificate paths for use by nginx:
 
 ```yaml
 - name: Configure Nginx Service
-  uses: affpro/vps-deploybot/configure-nginx-service@v0.0.118
+  uses: affpro/vps-deploybot/configure-nginx-service@v0.0.119
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
