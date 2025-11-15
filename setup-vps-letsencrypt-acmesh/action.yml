@@ -174,13 +174,14 @@ runs:
             # Request new certificate with manual DNS API
             echo "🚀 Requesting new certificate from Let's Encrypt..."
 
-            # Use manual DNS mode with API calls via webhook
+            # Manual DNS validation with hooks
             echo "Setting up DNS validation..."
             if $ACME_BIN --issue \
               $FORCE_FLAG \
-              --dns \
+              --manual \
+              --manual-auth-hook "$ACME_DIR/dns_hetzner_hook.sh" \
+              --manual-cleanup-hook "$ACME_DIR/dns_hetzner_hook.sh" \
               --server letsencrypt \
-              --dns-hook "$ACME_DIR/dns_hetzner_hook.sh" \
               $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
             else
