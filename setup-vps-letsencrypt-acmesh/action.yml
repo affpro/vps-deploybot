@@ -109,20 +109,54 @@ runs:
             exit 1
           fi
 
-          # Install Hetzner Cloud DNS hook for acme.sh
-          echo "📦 Installing Hetzner Cloud DNS hook..."
-          HETZNER_HOOK_DIR="$ACME_DIR/dnsapi"
-          HETZNER_HOOK_FILE="$HETZNER_HOOK_DIR/dns_hetznercloud.sh"
+          # Create Hetzner Cloud DNS hook script
+          echo "📦 Creating Hetzner Cloud DNS hook..."
+          cat > "$ACME_DIR/dns_hetzner_hook.sh" << 'DNSHOOK'
+#!/bin/bash
+# Hetzner Cloud DNS hook for manual DNS mode
+set -e
 
-          sudo rm -f "$HETZNER_HOOK_FILE"
-          mkdir -p "$HETZNER_HOOK_DIR"
+fulldomain="$1"
+txtvalue="$2"
+mode="$3"
 
-          # Base64 encoded hook script (avoids YAML/heredoc parsing issues)
-          HOOK_B64="IyEvYmluL2Jhc2gKWk9ORT0iJHsxI19hY21lLWNoYWxsZW5nZS59IgpBVVRIX0hFQURFUj0iQXV0aG9yaXphdGlvbjogQmVhcmVyICRIRVRaTkVSX1RPS0VOIgpaT05FX1JFU1A9JChjdXJsIC1zIC1IICIkQVVUSF9IRUFERVIiICJodHRwczovL2FwaS5oZXR6bmVyLmNsb3VkL3YxL3pvbmVzP25hbWU9JFpPTkUiKQpaT05FX0lEPSQoZWNobyAiJFpPTkVfUkVTUCIgfCBncmVwIC1vICciaWQiOiJbXiJdKiInIHwgaGVhZCAtMSB8IHNlZCAncy8iaWQiOiJcKFteIl0qXCkiL1wxLycpCmlmIFsgLXogIiRaT05FX0lEIiBdOyB0aGVuIGV4aXQgMTsgZmkKaWYgWyAtbiAiJDMiIF07IHRoZW4KICBSRUNUT1JEUz0kKGN1cmwgLXMgLUggIiRBVVRIX0hFQURFUiIgImh0dHBzOi8vYXBpLmhldHpuZXIuY2xvdWQvdjEvem9uZXMvJFpPTkVfSUQvcmVjb3JkcyIpCiAgUkVDT1JEX0lEPSQoZWNobyAiJFJFQ09SRFMiIHwgZ3JlcCAtbyAnImlkIjoiW14iXSoiJyB8IGhlYWQgLTEgfCBzZWQgJ3MvImlkIjoiXChbXiJdKlwpIi9cMS8nKQogIFsgLW4gIiRSRUNPUkRfSUQiIF0gJiYgY3VybCAtcyAtWCBERUxFVEUgLUggIiRBVVRIX0hFQURFUiIgImh0dHBzOi8vYXBpLmhldHpuZXIuY2xvdWQvdjEvem9uZXMvJFpPTkVfSUQvcmVjb3Jkcy8kUkVDT1JEX0lEIiA+IC9kZXYvbnVsbAplbHNlCiAgY3VybCAtcyAtWCBQT1NUIC1IICIkQVVUSF9IRUFERVIiIC1IICJDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24iICJodHRwczovL2FwaS5oZXR6bmVyLmNsb3VkL3YxL3pvbmVzLyRaT05FX0lEL3JlY29yZHMiIC1kICJ7XCJ0eXBlXCI6XCJUWFRcIixcIm5hbWVcIjpcIl9hY21lLWNoYWxsZW5nZVwiLFwidmFsdWVcIjpcIiQyXCIsXCJ0dGxcIjozMDB9IiA+IC9kZXYvbnVsbApmaQpleGl0IDAK"
+# Remove _acme-challenge prefix
+domain="${fulldomain#_acme-challenge.}"
 
-          echo "$HOOK_B64" | base64 -d | sudo tee "$HETZNER_HOOK_FILE" > /dev/null
-          sudo chmod +x "$HETZNER_HOOK_FILE"
-          echo "✅ Hetzner Cloud DNS hook installed"
+if [ "$mode" = "add" ]; then
+  # Create DNS record
+  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")
+  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
+
+  if [ -z "$ZONE_ID" ]; then
+    exit 1
+  fi
+
+  curl -s -X POST -H "Authorization: Bearer $HETZNER_TOKEN" -H "Content-Type: application/json" \
+    "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" \
+    -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge\",\"value\":\"$txtvalue\",\"ttl\":300}" > /dev/null
+
+elif [ "$mode" = "del" ]; then
+  # Delete DNS record
+  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")
+  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
+
+  if [ -n "$ZONE_ID" ]; then
+    RECORDS=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records")
+    RECORD_ID=$(echo "$RECORDS" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
+
+    if [ -n "$RECORD_ID" ]; then
+      curl -s -X DELETE -H "Authorization: Bearer $HETZNER_TOKEN" \
+        "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records/$RECORD_ID" > /dev/null
+    fi
+  fi
+fi
+
+exit 0
+DNSHOOK
+
+          sudo chmod +x "$ACME_DIR/dns_hetzner_hook.sh"
+          echo "✅ Hetzner Cloud DNS hook created"
 
           # Build domain list for acme.sh
           DOMAIN_ARGS="-d $DOMAIN"
@@ -158,22 +192,23 @@ runs:
               echo "✅ Certificate renewal checked"
             fi
           else
-            # Request new certificate
+            # Request new certificate with manual DNS API
             echo "🚀 Requesting new certificate from Let's Encrypt..."
 
-            # Use Let's Encrypt server and enable debug logging
-            if HETZNER_TOKEN="$HETZNER_TOKEN" $ACME_BIN --issue \
+            # Use manual DNS mode with API calls via webhook
+            echo "Setting up DNS validation..."
+            if $ACME_BIN --issue \
               $FORCE_FLAG \
-              --dns dns_hetznercloud \
+              --dns \
               --server letsencrypt \
-              --debug \
+              --dns-hook "$ACME_DIR/dns_hetzner_hook.sh" \
               $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
             else
               echo "❌ Certificate provisioning failed"
               echo ""
-              echo "=== Full Debug Log ==="
-              cat /tmp/acme_debug.log || true
+              echo "=== Debug Log ==="
+              tail -50 /tmp/acme_debug.log || true
               echo "=== End Debug Log ==="
               exit 1
             fi
