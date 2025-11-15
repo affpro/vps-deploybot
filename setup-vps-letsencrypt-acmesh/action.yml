@@ -89,7 +89,8 @@ runs:
           # Create webroot directory for acme challenges
           echo "📁 Creating webroot directory: $WEBROOT_PATH"
           sudo mkdir -p "$WEBROOT_PATH"
-          sudo chmod 755 "$WEBROOT_PATH"
+          sudo chmod 777 "$WEBROOT_PATH"  # Allow acme.sh user to write challenge files
+          echo "✅ Webroot directory created with write permissions"
 
           # Install acme.sh if not already installed
           ACME_DIR="$HOME/.acme.sh"
