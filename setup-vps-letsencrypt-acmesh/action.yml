@@ -1,5 +1,5 @@
-name: Setup Let's Encrypt SSL Certificate (Hetzner Cloud DNS with acme.sh)
-description: "Automatically provision SSL certificates from Let's Encrypt using Hetzner Cloud DNS validation with acme.sh"
+name: Setup Let's Encrypt SSL Certificate (acme.sh with Webroot)
+description: "Automatically provision SSL certificates from Let's Encrypt using HTTP-01 webroot validation (no nginx restart needed)"
 
 inputs:
   host:
@@ -19,12 +19,13 @@ inputs:
     description: "Comma-separated list of additional domains (e.g., www.example.com,api.example.com)"
     required: false
     default: ""
-  hetzner_dns_token:
-    description: "Hetzner Cloud API token with DNS permissions (from https://console.hetzner.cloud)"
-    required: true
   email:
     description: "Email for Let's Encrypt registration and renewal notices"
     required: true
+  webroot_path:
+    description: "Path on VPS where acme challenge files will be placed (default: /var/www/acme-challenges)"
+    required: false
+    default: "/var/www/acme-challenges"
   certificates_dir:
     description: "Directory to store certificates on VPS (default: /etc/letsencrypt)"
     required: false
@@ -33,10 +34,6 @@ inputs:
     description: "Force certificate renewal even if valid (set to 'true' to renew)"
     required: false
     default: "false"
-  nginx_container_name:
-    description: "Name of nginx Docker container to stop/restart (optional, e.g., nginx_proxy). Leave empty to skip."
-    required: false
-    default: ""
 
 outputs:
   cert_path:
@@ -52,62 +49,34 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Stop nginx Docker container (if specified)
-      shell: bash
-      run: |
-        if [ -n "${{ inputs.nginx_container_name }}" ]; then
-          echo "🛑 Stopping nginx container: ${{ inputs.nginx_container_name }}"
-          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-            "${{ inputs.user }}@${{ inputs.host }}" \
-            "docker stop '${{ inputs.nginx_container_name }}' 2>&1 && echo '✅ Container stopped' || echo '⚠️  Container stop command executed'"
-
-          # Wait for container to actually stop
-          sleep 2
-
-          # Verify it stopped
-          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-            "${{ inputs.user }}@${{ inputs.host }}" \
-            "STATUS=\$(docker inspect -f '{{.State.Status}}' '${{ inputs.nginx_container_name }}' 2>/dev/null || echo 'removed'); \
-            echo \"Container status: \$STATUS\"; \
-            if [ \"\$STATUS\" != \"exited\" ] && [ \"\$STATUS\" != \"removed\" ]; then \
-              echo \"⚠️  Container still running! Force killing...\"; \
-              docker kill '${{ inputs.nginx_container_name }}' || true; \
-            fi"
-
-          echo "✅ Nginx container stopped (port 80 should now be free)"
-        else
-          echo "ℹ️  nginx_container_name not specified - skipping nginx stop"
-        fi
-
-    - name: Provision SSL Certificate via Hetzner Cloud DNS (acme.sh)
+    - name: Provision SSL Certificate (acme.sh with Webroot)
       shell: bash
       env:
         DOMAIN: "${{ inputs.domain }}"
         ADDITIONAL_DOMAINS: "${{ inputs.additional_domains }}"
-        HETZNER_TOKEN: "${{ inputs.hetzner_dns_token }}"
         EMAIL: "${{ inputs.email }}"
         CERT_DIR: "${{ inputs.certificates_dir }}"
+        WEBROOT_PATH: "${{ inputs.webroot_path }}"
         FORCE_RENEWAL: "${{ inputs.force_renewal }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' HETZNER_TOKEN='$HETZNER_TOKEN' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' FORCE_RENEWAL='$FORCE_RENEWAL' bash -s" <<-'EOF'
+          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' WEBROOT_PATH='$WEBROOT_PATH' FORCE_RENEWAL='$FORCE_RENEWAL' bash -s" <<-'EOF'
           set -euo pipefail
 
-          echo "🔐 Provisioning SSL certificate with Let's Encrypt (Hetzner Cloud DNS via acme.sh)"
+          echo "🔐 Provisioning SSL certificate with Let's Encrypt (acme.sh with Webroot)"
           echo "   Primary Domain: $DOMAIN"
           if [ -n "$ADDITIONAL_DOMAINS" ]; then
             echo "   Additional Domains: $ADDITIONAL_DOMAINS"
           fi
           echo "   Email: $EMAIL"
           echo "   Certificate Directory: $CERT_DIR"
+          echo "   Webroot Path: $WEBROOT_PATH"
 
           # Validate inputs
-          if [ -z "$DOMAIN" ] || [ -z "$HETZNER_TOKEN" ] || [ -z "$EMAIL" ]; then
-            echo "❌ Missing required parameters: domain, hetzner_dns_token, and email are required"
+          if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
+            echo "❌ Missing required parameters: domain and email are required"
             exit 1
           fi
 
@@ -117,15 +86,10 @@ runs:
             sudo mkdir -p "$CERT_DIR"
           fi
 
-          # Install socat and curl (required for standalone HTTP-01 challenge)
-          echo "📦 Installing dependencies for HTTP-01 validation..."
-          if ! command -v socat &> /dev/null; then
-            sudo apt-get update -y > /dev/null 2>&1
-            sudo apt-get install -y socat curl > /dev/null 2>&1
-            echo "✅ socat and curl installed"
-          else
-            echo "✅ socat already installed"
-          fi
+          # Create webroot directory for acme challenges
+          echo "📁 Creating webroot directory: $WEBROOT_PATH"
+          sudo mkdir -p "$WEBROOT_PATH"
+          sudo chmod 755 "$WEBROOT_PATH"
 
           # Install acme.sh if not already installed
           ACME_DIR="$HOME/.acme.sh"
@@ -151,34 +115,6 @@ runs:
             echo "❌ acme.sh binary not found at $ACME_BIN"
             exit 1
           fi
-
-          # Create Hetzner Cloud DNS hook script using echo
-          echo "📦 Creating Hetzner Cloud DNS hook..."
-          echo '#!/bin/bash' > "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'set -e' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'fulldomain="$1"' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'txtvalue="$2"' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'mode="$3"' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'domain="${fulldomain#_acme-challenge.}"' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'if [ "$mode" = "add" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"'"'"id":"[^"]*"'"'"' | head -1 | sed '"'"'s/"id":"\([^"]*\)"/\1/'"'"')' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  if [ -z "$ZONE_ID" ]; then exit 1; fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  curl -s -X POST -H "Authorization: Bearer $HETZNER_TOKEN" -H "Content-Type: application/json" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge\",\"value\":\"$txtvalue\",\"ttl\":300}" > /dev/null' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'elif [ "$mode" = "del" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"'"'"id":"[^"]*"'"'"' | head -1 | sed '"'"'s/"id":"\([^"]*\)"/\1/'"'"')' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  if [ -n "$ZONE_ID" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '    RECORDS=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records")' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '    RECORD_ID=$(echo "$RECORDS" | grep -o '"'"'"id":"[^"]*"'"'"' | head -1 | sed '"'"'s/"id":"\([^"]*\)"/\1/'"'"')' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '    if [ -n "$RECORD_ID" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '      curl -s -X DELETE -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records/$RECORD_ID" > /dev/null' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '    fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo '  fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          echo 'exit 0' >> "$ACME_DIR/dns_hetzner_hook.sh"
-          sudo chmod +x "$ACME_DIR/dns_hetzner_hook.sh"
-          echo "✅ Hetzner Cloud DNS hook created"
 
           # Build domain list for acme.sh
           DOMAIN_ARGS="-d $DOMAIN"
@@ -209,41 +145,19 @@ runs:
             echo "   Path: $CERT_PATH"
             echo "🔄 Attempting renewal if certificate is near expiration..."
 
-            # acme.sh automatically handles renewal, but we can trigger it explicitly
+            # acme.sh automatically handles renewal
             if $ACME_BIN --renew $FORCE_FLAG -d "$DOMAIN" 2>/dev/null || true; then
               echo "✅ Certificate renewal checked"
             fi
           else
-            # Request new certificate using standalone HTTP-01 challenge
+            # Request new certificate using webroot HTTP-01 challenge
             echo "🚀 Requesting new certificate from Let's Encrypt..."
-
-            # Use standalone webserver for HTTP-01 challenge
-            echo "Setting up HTTP-01 validation..."
+            echo "Setting up HTTP-01 validation (via webroot)..."
             ACME_LOG="$ACME_DIR/${DOMAIN}/${DOMAIN}.log"
-
-            # Check port 80 status right before attempting certificate request
-            echo "Final port 80 check before requesting certificate..."
-            # Use ss (more reliable than netstat on modern systems)
-            PORT_80_CHECK=$(ss -tuln 2>/dev/null | grep ":80 " || true)
-            if [ -n "$PORT_80_CHECK" ]; then
-              echo "⚠️  WARNING: Port 80 is in use!"
-              echo "Port 80 details:"
-              ss -tulpn 2>/dev/null | grep ":80" | sed 's/^/  /'
-              echo ""
-              echo "Checking for services..."
-              ps aux | grep -i "nginx\|apache\|httpd\|docker\|node\|python\|java" | grep -v grep | sed 's/^/  /' || echo "  (Unable to identify service)"
-              echo ""
-              echo "⚠️  STOPPING: Port 80 is in use. acme.sh will fail."
-              echo "Solution: Stop the service and try again"
-              echo "  sudo systemctl stop nginx  # (or apache2, docker, etc.)"
-              exit 1
-            else
-              echo "✅ Port 80 is free - proceeding with certificate request"
-            fi
 
             if $ACME_BIN --issue \
               $FORCE_FLAG \
-              --standalone \
+              --webroot "$WEBROOT_PATH" \
               --server letsencrypt \
               $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
@@ -265,13 +179,12 @@ runs:
               # Troubleshooting suggestions
               echo ""
               echo "Troubleshooting:"
-              echo "1. Check DNS resolution:"
+              echo "1. Verify nginx is configured to serve from $WEBROOT_PATH"
+              echo "2. Check DNS resolution:"
               echo "   nslookup $DOMAIN"
-              echo ""
-              echo "2. Check Let's Encrypt can reach your domain:"
+              echo "3. Test webroot access:"
               echo "   curl -v http://$DOMAIN/.well-known/acme-challenge/test"
-              echo ""
-              echo "3. Check acme.sh log on VPS:"
+              echo "4. Check acme.sh log on VPS:"
               echo "   cat $ACME_LOG"
 
               exit 1
@@ -353,49 +266,8 @@ runs:
           fi
         EOF
 
-    - name: Restart nginx Docker container (if it was stopped)
+    - name: Restart nginx Docker container (if needed)
       shell: bash
       run: |
-        if [ -n "${{ inputs.nginx_container_name }}" ]; then
-          echo "🚀 Restarting nginx container: ${{ inputs.nginx_container_name }}"
-          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-            "${{ inputs.user }}@${{ inputs.host }}" \
-            "docker start '${{ inputs.nginx_container_name }}' && echo '✅ Container started' || echo '⚠️  Start command executed'"
-
-          echo "⏳ Waiting for nginx to be ready (up to 30 seconds)..."
-          for i in {1..30}; do
-            # Check container status
-            STATUS=$(ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-              -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-              "${{ inputs.user }}@${{ inputs.host }}" \
-              "docker inspect -f '{{.State.Status}}' '${{ inputs.nginx_container_name }}' 2>/dev/null || echo 'unknown'" 2>/dev/null || echo "unknown")
-
-            if [ "$STATUS" = "running" ]; then
-              # Try nginx config test
-              if ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-                -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-                "${{ inputs.user }}@${{ inputs.host }}" \
-                "docker exec '${{ inputs.nginx_container_name }}' nginx -t 2>/dev/null" >/dev/null 2>&1; then
-                echo "✅ Nginx container is running and ready"
-                break
-              fi
-            fi
-
-            echo "🔄 Waiting... ($i/30) Container status: $STATUS"
-            sleep 1
-          done
-
-          # Final verification
-          if ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-            "${{ inputs.user }}@${{ inputs.host }}" \
-            "docker ps --format '{{.Names}}' | grep -q '^${{ inputs.nginx_container_name }}\$'" 2>/dev/null; then
-            echo "🎉 Nginx restarted successfully with new certificates!"
-          else
-            echo "❌ ERROR: Nginx container failed to start!"
-            exit 1
-          fi
-        else
-          echo "ℹ️  nginx_container_name not specified - skipping nginx restart"
-        fi
+        echo "✅ Certificate provisioning complete - no nginx restart needed!"
+        echo "nginx continues serving from port 80 during validation"
