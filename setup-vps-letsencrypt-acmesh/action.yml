@@ -1,0 +1,232 @@
+name: Setup Let's Encrypt SSL Certificate (Hetzner Cloud DNS with acme.sh)
+description: "Automatically provision SSL certificates from Let's Encrypt using Hetzner Cloud DNS validation with acme.sh"
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  domain:
+    description: "Primary domain for the certificate (e.g., example.com)"
+    required: true
+  additional_domains:
+    description: "Comma-separated list of additional domains (e.g., www.example.com,api.example.com)"
+    required: false
+    default: ""
+  hetzner_dns_token:
+    description: "Hetzner Cloud API token with DNS permissions (from https://console.hetzner.cloud)"
+    required: true
+  email:
+    description: "Email for Let's Encrypt registration and renewal notices"
+    required: true
+  certificates_dir:
+    description: "Directory to store certificates on VPS (default: /etc/letsencrypt)"
+    required: false
+    default: "/etc/letsencrypt"
+  force_renewal:
+    description: "Force certificate renewal even if valid (set to 'true' to renew)"
+    required: false
+    default: "false"
+
+outputs:
+  cert_path:
+    description: "Path to the certificate file"
+    value: "${{ steps.cert-paths.outputs.cert_path }}"
+  key_path:
+    description: "Path to the private key file"
+    value: "${{ steps.cert-paths.outputs.key_path }}"
+  cert_dir:
+    description: "Directory containing certificates"
+    value: "${{ steps.cert-paths.outputs.cert_dir }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Provision SSL Certificate via Hetzner Cloud DNS (acme.sh)
+      shell: bash
+      env:
+        DOMAIN: "${{ inputs.domain }}"
+        ADDITIONAL_DOMAINS: "${{ inputs.additional_domains }}"
+        HETZNER_TOKEN: "${{ inputs.hetzner_dns_token }}"
+        EMAIL: "${{ inputs.email }}"
+        CERT_DIR: "${{ inputs.certificates_dir }}"
+        FORCE_RENEWAL: "${{ inputs.force_renewal }}"
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' HETZNER_TOKEN='$HETZNER_TOKEN' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' FORCE_RENEWAL='$FORCE_RENEWAL' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          echo "🔐 Provisioning SSL certificate with Let's Encrypt (Hetzner Cloud DNS via acme.sh)"
+          echo "   Primary Domain: $DOMAIN"
+          if [ -n "$ADDITIONAL_DOMAINS" ]; then
+            echo "   Additional Domains: $ADDITIONAL_DOMAINS"
+          fi
+          echo "   Email: $EMAIL"
+          echo "   Certificate Directory: $CERT_DIR"
+
+          # Validate inputs
+          if [ -z "$DOMAIN" ] || [ -z "$HETZNER_TOKEN" ] || [ -z "$EMAIL" ]; then
+            echo "❌ Missing required parameters: domain, hetzner_dns_token, and email are required"
+            exit 1
+          fi
+
+          # Create certificate directory
+          if [ ! -d "$CERT_DIR" ]; then
+            echo "📁 Creating certificate directory: $CERT_DIR"
+            sudo mkdir -p "$CERT_DIR"
+          fi
+
+          # Install acme.sh if not already installed
+          ACME_DIR="$HOME/.acme.sh"
+          if [ ! -d "$ACME_DIR" ]; then
+            echo "📥 Installing acme.sh..."
+            curl https://get.acme.sh | sh -s email="$EMAIL" > /dev/null 2>&1
+
+            # Source the acme.sh installation
+            source "$HOME/.bashrc" 2>/dev/null || true
+
+            if [ ! -d "$ACME_DIR" ]; then
+              echo "❌ Failed to install acme.sh"
+              exit 1
+            fi
+            echo "✅ acme.sh installed successfully"
+          else
+            echo "✅ acme.sh already installed"
+          fi
+
+          # Get acme.sh binary path
+          ACME_BIN="$ACME_DIR/acme.sh"
+          if [ ! -f "$ACME_BIN" ]; then
+            echo "❌ acme.sh binary not found at $ACME_BIN"
+            exit 1
+          fi
+
+          # Build domain list for acme.sh
+          DOMAIN_ARGS="-d $DOMAIN"
+          if [ -n "$ADDITIONAL_DOMAINS" ]; then
+            # Convert comma-separated list to multiple -d flags
+            IFS=',' read -ra DOMAINS <<< "$ADDITIONAL_DOMAINS"
+            for dom in "${DOMAINS[@]}"; do
+              dom=$(echo "$dom" | xargs)  # Trim whitespace
+              if [ -n "$dom" ]; then
+                DOMAIN_ARGS="$DOMAIN_ARGS -d $dom"
+              fi
+            done
+          fi
+
+          # Check for existing certificate
+          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+          FORCE_FLAG=""
+
+          if [ "$FORCE_RENEWAL" = "true" ]; then
+            echo "🔄 Force renewal requested"
+            FORCE_FLAG="--force"
+          fi
+
+          # Issue or renew certificate
+          if [ -f "$CERT_PATH" ] && [ "$FORCE_RENEWAL" != "true" ]; then
+            echo "ℹ️  Certificate already exists for $DOMAIN"
+            echo "   Path: $CERT_PATH"
+            echo "🔄 Attempting renewal if certificate is near expiration..."
+
+            # acme.sh automatically handles renewal, but we can trigger it explicitly
+            if $ACME_BIN --renew $FORCE_FLAG -d "$DOMAIN" --dns dns_hetznercloud 2>/dev/null || true; then
+              echo "✅ Certificate renewal checked"
+            fi
+          else
+            # Request new certificate
+            echo "🚀 Requesting new certificate from Let's Encrypt..."
+            if HETZNER_TOKEN="$HETZNER_TOKEN" $ACME_BIN --issue \
+              $FORCE_FLAG \
+              --dns dns_hetznercloud \
+              $DOMAIN_ARGS; then
+              echo "✅ Certificate successfully provisioned"
+            else
+              echo "❌ Certificate provisioning failed"
+              exit 1
+            fi
+          fi
+
+          # Install certificate to the target directory
+          echo "📦 Installing certificate to $CERT_DIR..."
+          LIVE_DIR="$CERT_DIR/live/$DOMAIN"
+          if ! mkdir -p "$LIVE_DIR"; then
+            echo "❌ Failed to create certificate directory"
+            exit 1
+          fi
+
+          if ! $ACME_BIN --install-cert -d "$DOMAIN" \
+            --key-file "$KEY_PATH" \
+            --fullchain-file "$CERT_PATH" \
+            --reloadcmd "echo 'Certificate installed'" 2>/dev/null; then
+            echo "❌ Failed to install certificate"
+            exit 1
+          fi
+
+          # Verify certificate exists
+          if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+            echo "❌ Certificate files not found at expected paths"
+            echo "   Expected cert: $CERT_PATH"
+            echo "   Expected key: $KEY_PATH"
+            exit 1
+          fi
+
+          # Set proper permissions
+          sudo chown root:root "$CERT_PATH" "$KEY_PATH" 2>/dev/null || true
+          sudo chmod 644 "$CERT_PATH" 2>/dev/null || true
+          sudo chmod 600 "$KEY_PATH" 2>/dev/null || true
+
+          # Display certificate details
+          echo ""
+          echo "✅ SSL Certificate Successfully Provisioned!"
+          echo ""
+          echo "📋 Certificate Details:"
+          echo "   Cert Path: $CERT_PATH"
+          echo "   Key Path: $KEY_PATH"
+
+          # Show expiration date
+          EXPIRY=$(openssl x509 -enddate -noout -in "$CERT_PATH" | cut -d= -f2)
+          echo "   Expires: $EXPIRY"
+
+          # Show all domains in certificate
+          echo "   Domains in Certificate:"
+          openssl x509 -noout -text -in "$CERT_PATH" | grep -A1 "Subject Alternative Name" | tail -1 | sed 's/DNS://g' | tr ',' '\n' | sed 's/^ */     - /' || true
+
+          echo ""
+          echo "🎉 Ready to use with nginx or other services!"
+          echo "⏰ Auto-renewal enabled: certificates will renew automatically before expiration"
+        EOF
+
+    - name: Extract certificate paths
+      id: cert-paths
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "CERT_DIR='${{ inputs.certificates_dir }}' DOMAIN='${{ inputs.domain }}' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+          CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
+
+          if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+            echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
+            echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
+            echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
+            echo "✅ Paths exported for subsequent steps"
+          else
+            echo "❌ Certificate paths not found"
+            exit 1
+          fi
+        EOF

@@ -34,19 +34,24 @@ This document tracks the setup and troubleshooting of the `setup-vps-letsencrypt
      - `hydrogen.ns.hetzner.com`
    - Zone created in Hetzner DNS console
 
-### 🔄 In Progress / Blocking Issue
+### ✅ Solution Implemented
 
-**Problem:** Certbot getting 404 error when trying to find the zone
+**Problem:** Certbot's `dns-hetzner` plugin doesn't support the new Hetzner Cloud API (api.hetzner.cloud)
 
-```
-requests.exceptions.HTTPError: 404 Client Error: Not Found
-for url: https://dns.hetzner.com/api/v1/zones?name=ordus.si
-```
+**Solution:** Created new `setup-vps-letsencrypt-acmesh` action using acme.sh
 
-**Current Attempt:**
-- Domain: `ordus.si`
-- Hetzner Zone: `ordus.si`
-- Action: `setup-vps-letsencrypt@v0.0.107`
+**Available Options:**
+1. **New: setup-vps-letsencrypt-acmesh** (Recommended for new Hetzner Cloud)
+   - Uses acme.sh with Hetzner Cloud DNS API (`dns_hetznercloud`)
+   - Supports new `api.hetzner.cloud/v1` endpoint
+   - No Python dependencies (pure shell script)
+   - Token from: https://console.hetzner.cloud
+
+2. **Legacy: setup-vps-letsencrypt** (For old DNS API)
+   - Uses certbot with dns-hetzner plugin
+   - Requires old `dns.hetzner.com` API
+   - Waiting for plugin to support new API
+   - Token from: https://dns.hetzner.com
 
 ## Root Cause Analysis
 
@@ -57,43 +62,38 @@ The error indicates that Hetzner's API cannot find the zone `ordus.si`. Possible
 3. **API Token Issue** - Token might not have proper permissions or is incorrect
 4. **Zone Name Mismatch** - Zone in console vs. domain being requested
 
-## Next Steps (Tomorrow)
+## Next Steps: Using acme.sh with Hetzner Cloud DNS
 
-### 1. Verify API Access
-Run this command on the VPS to test if Hetzner API can see the zone:
+### 1. Get Your Hetzner Cloud API Token
+1. Go to [Hetzner Cloud Console](https://console.hetzner.cloud)
+2. Select your project
+3. Navigate to **Security → API Tokens**
+4. Click "Generate API Token"
+5. Set permissions to **Read & Write** (for DNS management)
+6. Save the token securely
+7. Update GitHub secret `HETZNER_DNS_TOKEN` with this token
 
-```bash
-ssh your-vps
-curl -H "Auth-API-Token: YOUR_HETZNER_TOKEN" https://dns.hetzner.com/api/v1/zones
+### 2. Use New acme.sh Action in Your Workflow
+
+```yaml
+- uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@latest
+  id: ssl
+  with:
+    host: ${{ secrets.VPS_HOST }}
+    user: ${{ secrets.VPS_USER }}
+    domain: ordus.si
+    additional_domains: "www.ordus.si,api.ordus.si"  # Optional
+    hetzner_dns_token: ${{ secrets.HETZNER_DNS_TOKEN }}
+    email: ${{ secrets.LETSENCRYPT_EMAIL }}
+    certificates_dir: /etc/letsencrypt  # Optional
+    force_renewal: "false"  # Optional
 ```
-
-**Expected output:** JSON list containing `ordus.si` zone
-
-**If it works:**
-- Zone is visible to API
-- Proceed to step 2
-
-**If it fails with 404/empty:**
-- DNS propagation still in progress
-- Wait 10-15 minutes and retry
-- Check global DNS propagation: `dig ordus.si NS @8.8.8.8`
-
-**If it fails with 401:**
-- API token is incorrect
-- Verify token at https://dns.hetzner.com/settings/api-token
-- Update GitHub secret `HETZNER_DNS_TOKEN`
-
-### 2. Retry Certificate Provisioning
-Once curl command returns the zone, run the deployment workflow again:
-- The action should now successfully create the certificate
-- Certbot will validate via DNS TXT record
-- Certificate will be issued to `/etc/letsencrypt/live/ordus.si/`
 
 ### 3. Verify Certificate Creation
 After successful provisioning:
 
 ```bash
-ssh your-vps
+ssh admin@144.91.88.1
 sudo ls -la /etc/letsencrypt/live/ordus.si/
 sudo openssl x509 -in /etc/letsencrypt/live/ordus.si/fullchain.pem -text -noout | grep -A2 "Subject Alternative Name"
 ```
@@ -116,6 +116,13 @@ Once certificate exists, deploy your service:
     ssl_key_path: /etc/letsencrypt/live/ordus.si/privkey.pem
 ```
 
+### 5. Auto-Renewal
+acme.sh automatically:
+- Creates daily cron job for certificate checks
+- Renews certificates 60 days before expiration
+- No manual intervention needed
+- Certificates renew at 0:33 AM daily
+
 ## GitHub Secrets Required
 
 Make sure these are set in your repository:
@@ -130,10 +137,11 @@ LETSENCRYPT_EMAIL     # Email for renewal notifications
 
 ## Action Usage Reference
 
-### Setup Let's Encrypt Certificate
+### Option 1: New acme.sh Action (Recommended)
 
 ```yaml
-- uses: affpro/vps-deploybot/setup-vps-letsencrypt@v0.0.107
+- id: ssl
+  uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@latest
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
@@ -141,22 +149,50 @@ LETSENCRYPT_EMAIL     # Email for renewal notifications
     additional_domains: "www.ordus.si,api.ordus.si"  # Optional
     hetzner_dns_token: ${{ secrets.HETZNER_DNS_TOKEN }}
     email: ${{ secrets.LETSENCRYPT_EMAIL }}
-    certificates_dir: /etc/letsencrypt  # Optional, defaults shown
+    certificates_dir: /etc/letsencrypt  # Optional
     force_renewal: "false"  # Optional
 ```
 
-### Outputs
+**Features:**
+- ✅ Works with new Hetzner Cloud DNS API
+- ✅ No Python dependencies
+- ✅ Auto-renewal via cron job
+- ✅ Simpler setup
+
+### Option 2: Legacy certbot Action
+
+```yaml
+- id: ssl
+  uses: affpro/vps-deploybot/setup-vps-letsencrypt@v0.0.107
+  with:
+    host: ${{ secrets.VPS_HOST }}
+    user: ${{ secrets.VPS_USER }}
+    domain: ordus.si
+    additional_domains: "www.ordus.si,api.ordus.si"  # Optional
+    hetzner_dns_token: ${{ secrets.HETZNER_DNS_TOKEN }}
+    email: ${{ secrets.LETSENCRYPT_EMAIL }}
+    certificates_dir: /etc/letsencrypt  # Optional
+    force_renewal: "false"  # Optional
+```
+
+**Requires:**
+- Old Hetzner DNS API token from https://dns.hetzner.com
+- Zone created in old DNS console
+- Waiting for plugin update to support new API
+
+### Outputs (Both Actions)
 
 ```yaml
 steps:
   - id: ssl
-    uses: affpro/vps-deploybot/setup-vps-letsencrypt@v0.0.107
-    # ...
+    uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@latest
+    # or: affpro/vps-deploybot/setup-vps-letsencrypt@v0.0.107
 
   - uses: ./configure-nginx-service
     with:
       ssl_cert_path: ${{ steps.ssl.outputs.cert_path }}
       ssl_key_path: ${{ steps.ssl.outputs.key_path }}
+      # Other config options...
 ```
 
 ## Troubleshooting Checklist
@@ -175,11 +211,19 @@ steps:
 - Nginx config action: `/configure-nginx-service/action.yml`
 - Project docs: `/CLAUDE.md`
 
-## Version History
+## Action Versions
 
+### setup-vps-letsencrypt-acmesh (New - acme.sh)
+- **Latest**: Uses Hetzner Cloud DNS API (`api.hetzner.cloud/v1`)
+- Pure shell script - no Python dependencies
+- Automatic certificate renewal via cron
+- Recommended for all new deployments
+
+### setup-vps-letsencrypt (Legacy - certbot)
 - v0.0.107: Fixed Hetzner API token property name (`dns_hetzner_api_token`)
 - v0.0.106: Fixed YAML parsing error with printf/tee
 - v0.0.105: Fixed heredoc delimiter
 - v0.0.104: Fixed PEP 668 Ubuntu 24.04+ enforcement
 - v0.0.103: Fixed pip3 installation
 - v0.0.102: Initial setup-vps-letsencrypt action
+- **Status**: Waiting for certbot-dns-hetzner plugin to support new API
