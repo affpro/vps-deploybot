@@ -60,8 +60,29 @@ runs:
           ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
             -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
             "${{ inputs.user }}@${{ inputs.host }}" \
-            "docker stop ${{ inputs.nginx_container_name }} || echo '⚠️  Container not running or already stopped'"
-          echo "✅ Nginx container stopped (port 80 is now free)"
+            "CONTAINER='${{ inputs.nginx_container_name }}' bash -s" <<-'STOP_EOF'
+            set -euo pipefail
+
+            echo "Checking if container exists..."
+            if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+              echo "Container found: $CONTAINER"
+              echo "Stopping container..."
+              docker stop "$CONTAINER" && echo "✅ Container stopped" || echo "⚠️  Container stop failed"
+
+              # Verify it's actually stopped
+              sleep 2
+              STATUS=$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "removed")
+              echo "Container status after stop: $STATUS"
+
+              if [ "$STATUS" != "exited" ] && [ "$STATUS" != "removed" ]; then
+                echo "⚠️  WARNING: Container still running! Forcing stop..."
+                docker kill "$CONTAINER" || true
+              fi
+            else
+              echo "ℹ️  Container not found: $CONTAINER"
+            fi
+            STOP_EOF
+          echo "✅ Nginx container stopped (port 80 should now be free)"
         else
           echo "ℹ️  nginx_container_name not specified - skipping nginx stop"
         fi
@@ -346,21 +367,37 @@ runs:
           ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
             -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
             "${{ inputs.user }}@${{ inputs.host }}" \
-            "docker start ${{ inputs.nginx_container_name }}"
+            "CONTAINER='${{ inputs.nginx_container_name }}' bash -s" <<-'RESTART_EOF'
+            set -euo pipefail
 
-          echo "⏳ Waiting for nginx to be ready..."
-          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-            "${{ inputs.user }}@${{ inputs.host }}" \
-            "for i in {1..30}; do
-              if docker exec ${{ inputs.nginx_container_name }} nginx -t 2>/dev/null; then
-                echo '✅ Nginx is ready'
-                break
+            echo "Starting container: $CONTAINER"
+            docker start "$CONTAINER"
+
+            echo "⏳ Waiting for nginx to be ready (up to 30 seconds)..."
+            for i in {1..30}; do
+              # Check if container is running
+              STATUS=$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+
+              if [ "$STATUS" = "running" ]; then
+                # Test nginx configuration
+                if docker exec "$CONTAINER" nginx -t 2>/dev/null; then
+                  echo "✅ Nginx container is running and ready"
+                  break
+                fi
               fi
-              sleep 1
-            done"
 
-          echo "🎉 Nginx restarted successfully with new certificates!"
+              echo "🔄 Waiting... ($i/30) Container status: $STATUS"
+              sleep 1
+            done
+
+            # Final verification
+            if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+              echo "🎉 Nginx restarted successfully with new certificates!"
+            else
+              echo "❌ ERROR: Nginx container failed to start!"
+              exit 1
+            fi
+            RESTART_EOF
         else
           echo "ℹ️  nginx_container_name not specified - skipping nginx restart"
         fi
