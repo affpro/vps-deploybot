@@ -167,7 +167,7 @@ runs:
             echo "🔄 Attempting renewal if certificate is near expiration..."
 
             # acme.sh automatically handles renewal, but we can trigger it explicitly
-            if $ACME_BIN --renew $FORCE_FLAG -d "$DOMAIN" --dns dns_hetznercloud 2>/dev/null || true; then
+            if $ACME_BIN --renew $FORCE_FLAG -d "$DOMAIN" 2>/dev/null || true; then
               echo "✅ Certificate renewal checked"
             fi
           else

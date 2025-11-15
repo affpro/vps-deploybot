@@ -2,26 +2,27 @@
 
 ## Overview
 
-This document explains SSL certificate provisioning with Let's Encrypt using **acme.sh** and Hetzner Cloud DNS for automated renewal.
+This document explains SSL certificate provisioning with Let's Encrypt using **acme.sh** for automated certificate management and renewal.
 
 ## Current Status: ✅ Recommended Setup
 
 The deployment workflows now use the **recommended `setup-vps-letsencrypt-acmesh` action** which provides:
 
 - ✅ **Pure shell script** - No Python dependencies
-- ✅ **Hetzner Cloud DNS API** - Uses modern `api.hetzner.cloud/v1` endpoint
-- ✅ **Automatic renewal** - Daily cron job for certificate checks
+- ✅ **HTTP-01 validation** - Simple standalone webserver challenge (no DNS API required)
+- ✅ **Automatic renewal** - acme.sh automatically checks and renews certificates
 - ✅ **Zero-downtime** - Renews certificates 60 days before expiration
 - ✅ **Simple setup** - Minimal configuration required
+- ✅ **Compatible with all DNS providers** - Works with any domain
 
 ### Action Options Available
 
 1. **✅ NEW (Recommended): `setup-vps-letsencrypt-acmesh`**
-   - Uses acme.sh with Hetzner Cloud DNS API
-   - Works with modern Hetzner Cloud infrastructure
+   - Uses acme.sh with HTTP-01 standalone validation
+   - No DNS API token required
    - No Python dependencies (pure shell)
-   - Automatic renewal via daily cron job
-   - Token from: https://console.hetzner.cloud
+   - Automatic renewal via acme.sh background cron job
+   - Works with any DNS provider (Hetzner, Cloudflare, etc.)
 
 2. **Legacy: `setup-vps-letsencrypt`** (For old DNS API)
    - Uses certbot with dns-hetzner plugin
@@ -31,17 +32,12 @@ The deployment workflows now use the **recommended `setup-vps-letsencrypt-acmesh
 
 ## Quick Start: Setup acme.sh Certificate Provisioning
 
-### Step 1: Get Your Hetzner Cloud API Token
+### Step 1: Prepare Your VPS
 
-1. Go to [Hetzner Cloud Console](https://console.hetzner.cloud)
-2. Select your project
-3. Navigate to **Security → API Tokens**
-4. Click "Generate API Token"
-5. Set permissions to **Read & Write** (required for DNS management)
-6. Save the token securely
-7. Add to GitHub: Settings → Secrets and variables → Actions → New repository secret
-   - Name: `HETZNER_DNS_TOKEN`
-   - Value: Your API token
+The acme.sh action uses HTTP-01 validation, which requires:
+- Port 80 (HTTP) to be accessible on your VPS
+- No other service running on port 80 during certificate provisioning
+- The VPS must be reachable from the internet on port 80
 
 ### Step 2: Ensure GitHub Secrets Are Set
 
@@ -51,9 +47,10 @@ Required secrets in your repository:
 VPS_HOST              # Your VPS hostname or IP address
 VPS_USER              # SSH username for VPS
 VPS_SSH_KEY           # OpenSSH private key for SSH access
-HETZNER_DNS_TOKEN     # Hetzner Cloud API token (from Step 1)
 LETSENCRYPT_EMAIL     # Email for renewal notifications
 ```
+
+Note: Unlike the legacy approach, the new acme.sh action does **not** require a Hetzner API token.
 
 ### Step 3: Use in Your Workflow
 
@@ -62,15 +59,20 @@ Add this step to your GitHub Actions workflow:
 ```yaml
 - name: Provision SSL Certificate (acme.sh)
   id: ssl
-  uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@v0.0.119
+  uses: affpro/vps-deploybot/setup-vps-letsencrypt-acmesh@v0.0.120
   with:
     host: ${{ secrets.VPS_HOST }}
     user: ${{ secrets.VPS_USER }}
     domain: example.com
     additional_domains: "www.example.com,api.example.com"  # Optional
-    hetzner_dns_token: ${{ secrets.HETZNER_DNS_TOKEN }}
     email: ${{ secrets.LETSENCRYPT_EMAIL }}
 ```
+
+The action will:
+1. Install acme.sh on your VPS
+2. Start a temporary HTTP-01 validation webserver
+3. Let's Encrypt validates domain ownership via HTTP
+4. Install certificate to `/etc/letsencrypt/live/example.com/`
 
 ### Step 4: Use Certificate Paths in Next Steps
 
@@ -140,27 +142,30 @@ cert_dir:     # Directory containing certificate files
 
 ## Troubleshooting
 
-### Certificate provisioning fails with "zone not found"
+### Certificate provisioning fails with connection error
 
 **Possible causes and solutions:**
 
-1. **DNS not propagated** - If you recently changed nameservers to Hetzner, wait 15-30 minutes for propagation
+1. **Port 80 not accessible** - HTTP-01 validation requires port 80 to be open
    ```bash
-   # Check nameservers
-   nslookup -type=NS example.com
-   # Should show: helium.ns.hetzner.de, oxygen.ns.hetzner.com, hydrogen.ns.hetzner.com
+   # Check if port 80 is accessible from internet
+   curl -v http://example.com/.well-known/acme-challenge/test
    ```
+   - Verify UFW allows port 80: `sudo ufw status | grep 80`
+   - If blocked, allow it temporarily: `sudo ufw allow 80`
+   - Or configure VPS firewall to allow port 80
 
-2. **API token permissions** - Ensure token has "Read & Write" permissions for DNS
-   - Go to Hetzner Cloud Console → Security → API Tokens
-   - Check token permissions (should include DNS management)
+2. **Another service on port 80** - A web server may be running on port 80
+   - Check running services: `sudo netstat -tulpn | grep :80`
+   - Temporarily stop the service during provisioning
+   - Or use a different challenge type (requires DNS API integration)
 
-3. **Zone not created** - Verify zone exists in Hetzner Cloud
-   - Go to Hetzner Cloud Console → Networking → Zones
-   - Zone name must match your domain exactly
-
-4. **Wrong API token** - Using old dns.hetzner.com token instead of Hetzner Cloud token
-   - Get new token from https://console.hetzner.cloud (not dns.hetzner.com)
+3. **Domain DNS not pointing to VPS** - DNS must resolve to your VPS IP
+   ```bash
+   # Check DNS resolution
+   nslookup example.com
+   # Should show your VPS public IP
+   ```
 
 ### Certificate files not found after provisioning
 
