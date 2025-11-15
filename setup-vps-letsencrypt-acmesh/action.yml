@@ -160,13 +160,18 @@ runs:
           else
             # Request new certificate
             echo "🚀 Requesting new certificate from Let's Encrypt..."
+
+            # Enable debug logging if hook issues
             if HETZNER_TOKEN="$HETZNER_TOKEN" $ACME_BIN --issue \
               $FORCE_FLAG \
               --dns dns_hetznercloud \
-              $DOMAIN_ARGS; then
+              --log-level 2 \
+              $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
             else
               echo "❌ Certificate provisioning failed"
+              echo "Debug log:"
+              cat /tmp/acme_debug.log || true
               exit 1
             fi
           fi
