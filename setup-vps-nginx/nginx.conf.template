@@ -41,20 +41,4 @@ http {
     add_header X-XSS-Protection "1; mode=block";
 
     include /etc/nginx/sites-enabled/*.conf;
-
-    server {
-        listen 80 default_server;
-        listen [::]:80 default_server;
-        server_name _;
-
-        location / {
-            return 444;
-        }
-
-        location /nginx-health {
-            access_log off;
-            return 200 "nginx-ok\n";
-            add_header Content-Type text/plain;
-        }
-    }
 }

@@ -4,13 +4,21 @@
 # It must come before other server blocks to take precedence
 
 server {
-    listen 80;
-    listen [::]:80;
+    listen 80 default_server;
+    listen [::]:80 default_server;
     server_name _;
 
+    # Let's Encrypt ACME challenge validation
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenges;
         try_files $uri =404;
+    }
+
+    # Health check endpoint
+    location /nginx-health {
+        access_log off;
+        return 200 "nginx-ok\n";
+        add_header Content-Type text/plain;
     }
 
     # Reject all other requests
