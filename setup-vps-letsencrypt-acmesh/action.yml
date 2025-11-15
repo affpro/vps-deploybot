@@ -171,16 +171,14 @@ runs:
               echo "✅ Certificate renewal checked"
             fi
           else
-            # Request new certificate with manual DNS API
+            # Request new certificate using standalone HTTP-01 challenge
             echo "🚀 Requesting new certificate from Let's Encrypt..."
 
-            # Manual DNS validation with hooks
-            echo "Setting up DNS validation..."
+            # Use standalone webserver for HTTP-01 challenge
+            echo "Setting up HTTP-01 validation..."
             if $ACME_BIN --issue \
               $FORCE_FLAG \
-              --manual \
-              --manual-auth-hook "$ACME_DIR/dns_hetzner_hook.sh" \
-              --manual-cleanup-hook "$ACME_DIR/dns_hetzner_hook.sh" \
+              --standalone \
               --server letsencrypt \
               $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
