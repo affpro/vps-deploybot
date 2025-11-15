@@ -109,6 +109,26 @@ runs:
             exit 1
           fi
 
+          # Install Hetzner Cloud DNS hook for acme.sh
+          echo "📦 Installing Hetzner Cloud DNS hook..."
+          HETZNER_HOOK_DIR="$ACME_DIR/dnsapi"
+          HETZNER_HOOK_FILE="$HETZNER_HOOK_DIR/dns_hetznercloud.sh"
+
+          if [ ! -f "$HETZNER_HOOK_FILE" ]; then
+            mkdir -p "$HETZNER_HOOK_DIR"
+            # Download the dns_hetznercloud.sh hook from acme.sh repository
+            curl -s https://raw.githubusercontent.com/acmesh-official/acme.sh/master/dnsapi/dns_hetznercloud.sh -o "$HETZNER_HOOK_FILE"
+
+            if [ ! -f "$HETZNER_HOOK_FILE" ]; then
+              echo "❌ Failed to install Hetzner Cloud DNS hook"
+              exit 1
+            fi
+            chmod +x "$HETZNER_HOOK_FILE"
+            echo "✅ Hetzner Cloud DNS hook installed"
+          else
+            echo "✅ Hetzner Cloud DNS hook already installed"
+          fi
+
           # Build domain list for acme.sh
           DOMAIN_ARGS="-d $DOMAIN"
           if [ -n "$ADDITIONAL_DOMAINS" ]; then
