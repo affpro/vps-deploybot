@@ -184,21 +184,45 @@ runs:
             # Request new certificate using standalone HTTP-01 challenge
             echo "🚀 Requesting new certificate from Let's Encrypt..."
 
+            # Check if port 80 is accessible
+            echo "Checking port 80 accessibility..."
+            if ! netstat -tuln 2>/dev/null | grep -q ":80 "; then
+              echo "⚠️  Port 80 does not appear to be listening"
+            fi
+
             # Use standalone webserver for HTTP-01 challenge
             echo "Setting up HTTP-01 validation..."
+            ACME_LOG="$ACME_DIR/${DOMAIN}/${DOMAIN}.log"
+
             if $ACME_BIN --issue \
               $FORCE_FLAG \
               --standalone \
-              --debug \
               --server letsencrypt \
               $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
               echo "✅ Certificate successfully provisioned"
             else
               echo "❌ Certificate provisioning failed"
               echo ""
-              echo "=== Debug Log ==="
-              tail -100 /tmp/acme_debug.log || true
-              echo "=== End Debug Log ==="
+              echo "=== acme.sh output ==="
+              tail -50 /tmp/acme_debug.log || true
+              echo "=== End acme.sh output ==="
+
+              # Show acme.sh log if it exists
+              if [ -f "$ACME_LOG" ]; then
+                echo ""
+                echo "=== acme.sh detailed log ==="
+                tail -50 "$ACME_LOG" || true
+                echo "=== End detailed log ==="
+              fi
+
+              # Check for common issues
+              echo ""
+              echo "Diagnostics:"
+              echo "- Port 80 status:"
+              netstat -tuln 2>/dev/null | grep ":80 " || echo "  Port 80 not listening"
+              echo "- Services on port 80:"
+              lsof -i :80 2>/dev/null || echo "  (lsof not available)"
+
               exit 1
             fi
           fi
