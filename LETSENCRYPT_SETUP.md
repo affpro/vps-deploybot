@@ -38,6 +38,7 @@ The acme.sh action uses HTTP-01 validation, which requires:
 - Port 80 (HTTP) to be accessible on your VPS
 - No other service running on port 80 during certificate provisioning
 - The VPS must be reachable from the internet on port 80
+- The action automatically installs `socat` (required for HTTP-01 webserver) if not present
 
 ### Step 2: Ensure GitHub Secrets Are Set
 
@@ -141,6 +142,22 @@ cert_dir:     # Directory containing certificate files
 ```
 
 ## Troubleshooting
+
+### Certificate provisioning fails with "Please install socat tools first"
+
+**Solution:**
+
+The action automatically installs `socat`, but if installation fails:
+
+```bash
+ssh user@your-vps
+
+# Install socat manually
+sudo apt-get update
+sudo apt-get install -y socat curl
+
+# Try certificate provisioning again
+```
 
 ### Certificate provisioning fails with connection error
 
