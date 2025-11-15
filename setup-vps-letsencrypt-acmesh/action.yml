@@ -33,6 +33,10 @@ inputs:
     description: "Force certificate renewal even if valid (set to 'true' to renew)"
     required: false
     default: "false"
+  nginx_container_name:
+    description: "Name of nginx Docker container to stop/restart (optional, e.g., nginx_proxy). Leave empty to skip."
+    required: false
+    default: ""
 
 outputs:
   cert_path:
@@ -48,6 +52,20 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Stop nginx Docker container (if specified)
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.nginx_container_name }}" ]; then
+          echo "🛑 Stopping nginx container: ${{ inputs.nginx_container_name }}"
+          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ inputs.user }}@${{ inputs.host }}" \
+            "docker stop ${{ inputs.nginx_container_name }} || echo '⚠️  Container not running or already stopped'"
+          echo "✅ Nginx container stopped (port 80 is now free)"
+        else
+          echo "ℹ️  nginx_container_name not specified - skipping nginx stop"
+        fi
+
     - name: Provision SSL Certificate via Hetzner Cloud DNS (acme.sh)
       shell: bash
       env:
@@ -319,3 +337,30 @@ runs:
             exit 1
           fi
         EOF
+
+    - name: Restart nginx Docker container (if it was stopped)
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.nginx_container_name }}" ]; then
+          echo "🚀 Restarting nginx container: ${{ inputs.nginx_container_name }}"
+          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ inputs.user }}@${{ inputs.host }}" \
+            "docker start ${{ inputs.nginx_container_name }}"
+
+          echo "⏳ Waiting for nginx to be ready..."
+          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ inputs.user }}@${{ inputs.host }}" \
+            "for i in {1..30}; do
+              if docker exec ${{ inputs.nginx_container_name }} nginx -t 2>/dev/null; then
+                echo '✅ Nginx is ready'
+                break
+              fi
+              sleep 1
+            done"
+
+          echo "🎉 Nginx restarted successfully with new certificates!"
+        else
+          echo "ℹ️  nginx_container_name not specified - skipping nginx restart"
+        fi
