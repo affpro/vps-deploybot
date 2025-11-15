@@ -186,8 +186,10 @@ runs:
 
             # Check if port 80 is accessible
             echo "Checking port 80 accessibility..."
-            if ! netstat -tuln 2>/dev/null | grep -q ":80 "; then
-              echo "⚠️  Port 80 does not appear to be listening"
+            if netstat -tuln 2>/dev/null | grep -q ":80 "; then
+              echo "⚠️  Port 80 is already in use. Checking which service..."
+              # Try to find the process using port 80
+              ss -tulpn 2>/dev/null | grep :80 || ps aux | grep -i "nginx\|apache\|httpd" | grep -v grep || echo "  (Unable to identify process)"
             fi
 
             # Use standalone webserver for HTTP-01 challenge
@@ -219,9 +221,15 @@ runs:
               echo ""
               echo "Diagnostics:"
               echo "- Port 80 status:"
-              netstat -tuln 2>/dev/null | grep ":80 " || echo "  Port 80 not listening"
-              echo "- Services on port 80:"
-              lsof -i :80 2>/dev/null || echo "  (lsof not available)"
+              if netstat -tuln 2>/dev/null | grep -q ":80 "; then
+                echo "  ⚠️  Port 80 IS IN USE"
+                echo "- Services/processes on port 80:"
+                ss -tulpn 2>/dev/null | grep :80 | sed 's/^/  /' || {
+                  ps aux | grep -i "nginx\|apache\|httpd\|docker" | grep -v grep | sed 's/^/  /'
+                }
+              else
+                echo "  Port 80 not listening"
+              fi
 
               exit 1
             fi
