@@ -111,99 +111,75 @@ runs:
 
           # Install Hetzner Cloud DNS hook for acme.sh
           echo "📦 Installing Hetzner Cloud DNS hook..."
+          HETZNER_HOOK_DIR="$ACME_DIR/dnsapi"
+          HETZNER_HOOK_FILE="$HETZNER_HOOK_DIR/dns_hetznercloud.sh"
 
-          # Use acme.sh's install-dnsapi command to install the hook
-          if ! $ACME_BIN --install-dnsapi --dnsapi dns_hetznercloud 2>/dev/null; then
-            # Fallback: manually create the hook directory structure
-            HETZNER_HOOK_DIR="$ACME_DIR/dnsapi"
+          if [ ! -f "$HETZNER_HOOK_FILE" ]; then
             mkdir -p "$HETZNER_HOOK_DIR"
 
-            # Create the hook file directly with proper DNS API handling
-            cat > "$HETZNER_HOOK_DIR/dns_hetznercloud.sh" << 'HOOK_EOF'
-#!/usr/bin/env sh
+            # Install pip and requests library for Python-based hook
+            if ! command -v pip3 &> /dev/null; then
+              sudo apt-get update -y && sudo apt-get install -y python3-pip
+            fi
 
-# Hetzner Cloud DNS API support for acme.sh
-# Usage: dns_hetznercloud "domain" "TXT-value" "add|del"
+            # Install certbot-dns-hetzner for compatibility
+            if ! sudo pip3 install certbot-dns-hetzner 2>/dev/null; then
+              sudo pip3 install --break-system-packages certbot-dns-hetzner 2>/dev/null || true
+            fi
 
-dns_hetznercloud_add() {
-  fulldomain=$1
-  txtvalue=$2
+            # Create shell-based hook script
+            sudo tee "$HETZNER_HOOK_FILE" > /dev/null << 'EOF'
+#!/bin/bash
+# Hetzner Cloud DNS hook for acme.sh
+# Requires: HETZNER_TOKEN environment variable
 
-  if [ -z "$HETZNER_TOKEN" ]; then
-    echo "Error: HETZNER_TOKEN environment variable not set"
-    return 1
-  fi
-
-  # Extract zone name from domain
-  zone=$(echo "$fulldomain" | sed 's/^_acme-challenge\.//')
-
-  # Find the zone ID
-  zone_response=$(curl -s -X GET "https://api.hetzner.cloud/v1/zones?name=$zone" \
-    -H "Authorization: Bearer $HETZNER_TOKEN")
-
-  zone_id=$(echo "$zone_response" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [ -z "$zone_id" ]; then
-    echo "Error: Could not find zone for domain $zone"
-    return 1
-  fi
-
-  # Create DNS record
-  curl -s -X POST "https://api.hetzner.cloud/v1/zones/$zone_id/records" \
-    -H "Authorization: Bearer $HETZNER_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge\",\"value\":\"$txtvalue\",\"ttl\":300}" > /dev/null
-
-  return 0
-}
-
-dns_hetznercloud_rm() {
-  fulldomain=$1
-
-  if [ -z "$HETZNER_TOKEN" ]; then
-    echo "Error: HETZNER_TOKEN environment variable not set"
-    return 1
-  fi
-
-  # Extract zone name
-  zone=$(echo "$fulldomain" | sed 's/^_acme-challenge\.//')
-
-  # Find zone ID
-  zone_response=$(curl -s -X GET "https://api.hetzner.cloud/v1/zones?name=$zone" \
-    -H "Authorization: Bearer $HETZNER_TOKEN")
-
-  zone_id=$(echo "$zone_response" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [ -z "$zone_id" ]; then
-    return 0
-  fi
-
-  # Find and delete the TXT record
-  records=$(curl -s -X GET "https://api.hetzner.cloud/v1/zones/$zone_id/records?type=TXT&name=_acme-challenge" \
-    -H "Authorization: Bearer $HETZNER_TOKEN")
-
-  record_id=$(echo "$records" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [ -n "$record_id" ]; then
-    curl -s -X DELETE "https://api.hetzner.cloud/v1/zones/$zone_id/records/$record_id" \
-      -H "Authorization: Bearer $HETZNER_TOKEN" > /dev/null
-  fi
-
-  return 0
-}
-
-# Main dispatcher
-if [ "$2" = "add" ] || [ -z "$3" ]; then
-  dns_hetznercloud_add "$1" "$2"
-else
-  dns_hetznercloud_rm "$1"
+if [ $# -lt 2 ]; then
+  echo "Usage: $0 <domain> <token> [cleanup]" >&2
+  exit 1
 fi
-HOOK_EOF
 
-            chmod +x "$HETZNER_HOOK_DIR/dns_hetznercloud.sh"
-            echo "✅ Hetzner Cloud DNS hook created"
-          else
+DOMAIN="$1"
+TOKEN="$2"
+CLEANUP="${3:-}"
+
+# Remove _acme-challenge prefix if present
+ZONE="${DOMAIN#_acme-challenge.}"
+
+# Get zone ID
+ZONE_ID=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" \
+  "https://api.hetzner.cloud/v1/zones?name=$ZONE" | \
+  grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -z "$ZONE_ID" ]; then
+  echo "Error: Could not find zone for $ZONE" >&2
+  exit 1
+fi
+
+if [ -n "$CLEANUP" ]; then
+  # Delete TXT record
+  RECORD_ID=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" \
+    "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" | \
+    grep -B5 "_acme-challenge" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [ -n "$RECORD_ID" ]; then
+    curl -s -X DELETE -H "Authorization: Bearer $HETZNER_TOKEN" \
+      "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records/$RECORD_ID" > /dev/null
+  fi
+else
+  # Create TXT record for DNS-01 validation
+  curl -s -X POST -H "Authorization: Bearer $HETZNER_TOKEN" \
+    -H "Content-Type: application/json" \
+    "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" \
+    -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge\",\"value\":\"$TOKEN\",\"ttl\":300}" > /dev/null
+fi
+
+exit 0
+EOF
+
+            sudo chmod +x "$HETZNER_HOOK_FILE"
             echo "✅ Hetzner Cloud DNS hook installed"
+          else
+            echo "✅ Hetzner Cloud DNS hook already installed"
           fi
 
           # Build domain list for acme.sh
