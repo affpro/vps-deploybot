@@ -114,41 +114,14 @@ runs:
           HETZNER_HOOK_DIR="$ACME_DIR/dnsapi"
           HETZNER_HOOK_FILE="$HETZNER_HOOK_DIR/dns_hetznercloud.sh"
 
-          # Remove old/corrupted hook if it exists
           sudo rm -f "$HETZNER_HOOK_FILE"
           mkdir -p "$HETZNER_HOOK_DIR"
 
-          # Create hook script - simple approach without complex quoting
-          cat > /tmp/hz_hook.sh << 'HOOKSCRIPT'
-#!/bin/bash
-# Hetzner Cloud DNS hook for acme.sh
-ZONE="${1#_acme-challenge.}"
-AUTH_HEADER="Authorization: Bearer $HETZNER_TOKEN"
+          # Base64 encoded hook script (avoids YAML/heredoc parsing issues)
+          HOOK_B64="IyEvYmluL2Jhc2gKWk9ORT0iJHsxI19hY21lLWNoYWxsZW5nZS59IgpBVVRIX0hFQURFUj0iQXV0aG9yaXphdGlvbjogQmVhcmVyICRIRVRaTkVSX1RPS0VOIgpaT05FX1JFU1A9JChjdXJsIC1zIC1IICIkQVVUSF9IRUFERVIiICJodHRwczovL2FwaS5oZXR6bmVyLmNsb3VkL3YxL3pvbmVzP25hbWU9JFpPTkUiKQpaT05FX0lEPSQoZWNobyAiJFpPTkVfUkVTUCIgfCBncmVwIC1vICciaWQiOiJbXiJdKiInIHwgaGVhZCAtMSB8IHNlZCAncy8iaWQiOiJcKFteIl0qXCkiL1wxLycpCmlmIFsgLXogIiRaT05FX0lEIiBdOyB0aGVuIGV4aXQgMTsgZmkKaWYgWyAtbiAiJDMiIF07IHRoZW4KICBSRUNUT1JEUz0kKGN1cmwgLXMgLUggIiRBVVRIX0hFQURFUiIgImh0dHBzOi8vYXBpLmhldHpuZXIuY2xvdWQvdjEvem9uZXMvJFpPTkVfSUQvcmVjb3JkcyIpCiAgUkVDT1JEX0lEPSQoZWNobyAiJFJFQ09SRFMiIHwgZ3JlcCAtbyAnImlkIjoiW14iXSoiJyB8IGhlYWQgLTEgfCBzZWQgJ3MvImlkIjoiXChbXiJdKlwpIi9cMS8nKQogIFsgLW4gIiRSRUNPUkRfSUQiIF0gJiYgY3VybCAtcyAtWCBERUxFVEUgLUggIiRBVVRIX0hFQURFUiIgImh0dHBzOi8vYXBpLmhldHpuZXIuY2xvdWQvdjEvem9uZXMvJFpPTkVfSUQvcmVjb3Jkcy8kUkVDT1JEX0lEIiA+IC9kZXYvbnVsbAplbHNlCiAgY3VybCAtcyAtWCBQT1NUIC1IICIkQVVUSF9IRUFERVIiIC1IICJDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24iICJodHRwczovL2FwaS5oZXR6bmVyLmNsb3VkL3YxL3pvbmVzLyRaT05FX0lEL3JlY29yZHMiIC1kICJ7XCJ0eXBlXCI6XCJUWFRcIixcIm5hbWVcIjpcIl9hY21lLWNoYWxsZW5nZVwiLFwidmFsdWVcIjpcIiQyXCIsXCJ0dGxcIjozMDB9IiA+IC9kZXYvbnVsbApmaQpleGl0IDAK"
 
-# Get zone ID
-ZONE_RESP=$(curl -s -H "$AUTH_HEADER" "https://api.hetzner.cloud/v1/zones?name=$ZONE")
-ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
-
-if [ -z "$ZONE_ID" ]; then
-  exit 1
-fi
-
-if [ -n "$3" ]; then
-  # Cleanup: delete record
-  RECORDS=$(curl -s -H "$AUTH_HEADER" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records")
-  RECORD_ID=$(echo "$RECORDS" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
-  [ -n "$RECORD_ID" ] && curl -s -X DELETE -H "$AUTH_HEADER" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records/$RECORD_ID" > /dev/null
-else
-  # Create DNS record
-  curl -s -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-    "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" \
-    -d '{"type":"TXT","name":"_acme-challenge","value":"'"$2"'","ttl":300}' > /dev/null
-fi
-HOOKSCRIPT
-
-          sudo cp /tmp/hz_hook.sh "$HETZNER_HOOK_FILE"
+          echo "$HOOK_B64" | base64 -d | sudo tee "$HETZNER_HOOK_FILE" > /dev/null
           sudo chmod +x "$HETZNER_HOOK_FILE"
-          rm -f /tmp/hz_hook.sh
           echo "✅ Hetzner Cloud DNS hook installed"
 
           # Build domain list for acme.sh
