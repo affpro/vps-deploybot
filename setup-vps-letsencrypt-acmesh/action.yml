@@ -190,14 +190,22 @@ runs:
 
             # Check port 80 status right before attempting certificate request
             echo "Final port 80 check before requesting certificate..."
-            PORT_80_CHECK=$(netstat -tuln 2>/dev/null | grep ":80 " || true)
+            # Use ss (more reliable than netstat on modern systems)
+            PORT_80_CHECK=$(ss -tuln 2>/dev/null | grep ":80 " || true)
             if [ -n "$PORT_80_CHECK" ]; then
               echo "⚠️  WARNING: Port 80 is in use!"
-              echo "Services/processes on port 80:"
-              ss -tulpn 2>/dev/null | grep :80 | sed 's/^/  /' || {
-                ps aux | grep -i "nginx\|apache\|httpd\|docker" | grep -v grep | sed 's/^/  /'
-              }
-              echo "Attempting certificate request anyway - acme.sh will handle port 80 binding..."
+              echo "Port 80 details:"
+              ss -tulpn 2>/dev/null | grep ":80" | sed 's/^/  /'
+              echo ""
+              echo "Checking for services..."
+              ps aux | grep -i "nginx\|apache\|httpd\|docker\|node\|python\|java" | grep -v grep | sed 's/^/  /' || echo "  (Unable to identify service)"
+              echo ""
+              echo "⚠️  STOPPING: Port 80 is in use. acme.sh will fail."
+              echo "Solution: Stop the service and try again"
+              echo "  sudo systemctl stop nginx  # (or apache2, docker, etc.)"
+              exit 1
+            else
+              echo "✅ Port 80 is free - proceeding with certificate request"
             fi
 
             if $ACME_BIN --issue \
@@ -221,26 +229,17 @@ runs:
                 echo "=== End detailed log ==="
               fi
 
-              # Check for common issues at failure time
+              # Troubleshooting suggestions
               echo ""
-              echo "Diagnostics at failure:"
-              echo "- Port 80 status:"
-              if netstat -tuln 2>/dev/null | grep -q ":80 "; then
-                echo "  ⚠️  Port 80 IS IN USE - This is why acme.sh failed!"
-                echo "- Services/processes on port 80:"
-                ss -tulpn 2>/dev/null | grep :80 | sed 's/^/  /' || {
-                  ps aux | grep -i "nginx\|apache\|httpd\|docker\|node\|python\|java" | grep -v grep | sed 's/^/  /'
-                }
-                echo ""
-                echo "SOLUTION: Stop the service(s) above and try again:"
-                echo "  sudo systemctl stop nginx  # (or apache2, docker, etc.)"
-                echo "  Then re-run this action"
-                echo "  sudo systemctl start nginx # (restart after action completes)"
-              else
-                echo "  Port 80 not listening"
-                echo "- DNS resolution:"
-                nslookup "$DOMAIN" 2>&1 | head -5 || echo "  Unable to check DNS"
-              fi
+              echo "Troubleshooting:"
+              echo "1. Check DNS resolution:"
+              echo "   nslookup $DOMAIN"
+              echo ""
+              echo "2. Check Let's Encrypt can reach your domain:"
+              echo "   curl -v http://$DOMAIN/.well-known/acme-challenge/test"
+              echo ""
+              echo "3. Check acme.sh log on VPS:"
+              echo "   cat $ACME_LOG"
 
               exit 1
             fi
