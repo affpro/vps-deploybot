@@ -38,6 +38,7 @@ runs:
         mkdir -p /tmp/nginx-templates
         cp "${{ github.action_path }}/nginx.conf.template" /tmp/nginx-templates/
         cp "${{ github.action_path }}/default.conf.template" /tmp/nginx-templates/
+        cp "${{ github.action_path }}/acme-challenge.conf.template" /tmp/nginx-templates/
 
     - name: Transfer Templates to VPS
       shell: bash
@@ -49,6 +50,9 @@ runs:
         scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no -o LogLevel=ERROR \
           /tmp/nginx-templates/default.conf.template \
           "${{ inputs.user }}@${{ inputs.host }}:/tmp/default.conf.template"
+        scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+          /tmp/nginx-templates/acme-challenge.conf.template \
+          "${{ inputs.user }}@${{ inputs.host }}:/tmp/acme-challenge.conf.template"
 
     - name: Setup Nginx Container
       shell: bash
@@ -85,7 +89,9 @@ runs:
           # Move templates from /tmp to nginx config directory
           echo "📝 Installing nginx configuration files..."
           sudo mv /tmp/nginx.conf.template "$NGINX_CONFIG_DIR/nginx.conf"
+          sudo mv /tmp/acme-challenge.conf.template "$NGINX_SITES_DIR/00-acme-challenge.conf"
           sudo mv /tmp/default.conf.template "$NGINX_SITES_DIR/default.conf"
+          echo "✅ ACME challenge configuration installed"
 
           # Clean up old-style service configs that use upstream blocks
           echo "🧹 Checking for old-style service configurations..."

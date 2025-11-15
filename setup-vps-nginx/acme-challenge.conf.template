@@ -1,0 +1,20 @@
+# ACME Challenge Configuration for Let's Encrypt
+# Allows acme.sh to validate domain ownership via HTTP-01 webroot method
+# This server block handles .well-known/acme-challenge requests on all domains
+# It must come before other server blocks to take precedence
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme-challenges;
+        try_files $uri =404;
+    }
+
+    # Reject all other requests
+    location / {
+        return 444;
+    }
+}
