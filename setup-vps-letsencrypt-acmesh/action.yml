@@ -109,52 +109,31 @@ runs:
             exit 1
           fi
 
-          # Create Hetzner Cloud DNS hook script
+          # Create Hetzner Cloud DNS hook script using echo
           echo "📦 Creating Hetzner Cloud DNS hook..."
-          cat > "$ACME_DIR/dns_hetzner_hook.sh" << 'DNSHOOK'
-#!/bin/bash
-# Hetzner Cloud DNS hook for manual DNS mode
-set -e
-
-fulldomain="$1"
-txtvalue="$2"
-mode="$3"
-
-# Remove _acme-challenge prefix
-domain="${fulldomain#_acme-challenge.}"
-
-if [ "$mode" = "add" ]; then
-  # Create DNS record
-  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")
-  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
-
-  if [ -z "$ZONE_ID" ]; then
-    exit 1
-  fi
-
-  curl -s -X POST -H "Authorization: Bearer $HETZNER_TOKEN" -H "Content-Type: application/json" \
-    "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" \
-    -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge\",\"value\":\"$txtvalue\",\"ttl\":300}" > /dev/null
-
-elif [ "$mode" = "del" ]; then
-  # Delete DNS record
-  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")
-  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
-
-  if [ -n "$ZONE_ID" ]; then
-    RECORDS=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records")
-    RECORD_ID=$(echo "$RECORDS" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"\([^"]*\)"/\1/')
-
-    if [ -n "$RECORD_ID" ]; then
-      curl -s -X DELETE -H "Authorization: Bearer $HETZNER_TOKEN" \
-        "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records/$RECORD_ID" > /dev/null
-    fi
-  fi
-fi
-
-exit 0
-DNSHOOK
-
+          echo '#!/bin/bash' > "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'set -e' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'fulldomain="$1"' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'txtvalue="$2"' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'mode="$3"' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'domain="${fulldomain#_acme-challenge.}"' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'if [ "$mode" = "add" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"'"'"id":"[^"]*"'"'"' | head -1 | sed '"'"'s/"id":"\([^"]*\)"/\1/'"'"')' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  if [ -z "$ZONE_ID" ]; then exit 1; fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  curl -s -X POST -H "Authorization: Bearer $HETZNER_TOKEN" -H "Content-Type: application/json" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records" -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge\",\"value\":\"$txtvalue\",\"ttl\":300}" > /dev/null' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'elif [ "$mode" = "del" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  ZONE_RESP=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones?name=$domain")' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  ZONE_ID=$(echo "$ZONE_RESP" | grep -o '"'"'"id":"[^"]*"'"'"' | head -1 | sed '"'"'s/"id":"\([^"]*\)"/\1/'"'"')' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  if [ -n "$ZONE_ID" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '    RECORDS=$(curl -s -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records")' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '    RECORD_ID=$(echo "$RECORDS" | grep -o '"'"'"id":"[^"]*"'"'"' | head -1 | sed '"'"'s/"id":"\([^"]*\)"/\1/'"'"')' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '    if [ -n "$RECORD_ID" ]; then' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '      curl -s -X DELETE -H "Authorization: Bearer $HETZNER_TOKEN" "https://api.hetzner.cloud/v1/zones/$ZONE_ID/records/$RECORD_ID" > /dev/null' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '    fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo '  fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'fi' >> "$ACME_DIR/dns_hetzner_hook.sh"
+          echo 'exit 0' >> "$ACME_DIR/dns_hetzner_hook.sh"
           sudo chmod +x "$ACME_DIR/dns_hetzner_hook.sh"
           echo "✅ Hetzner Cloud DNS hook created"
 
