@@ -158,11 +158,16 @@ runs:
             echo "Setting up HTTP-01 validation (via webroot)..."
             ACME_LOG="$ACME_DIR/${DOMAIN}/${DOMAIN}.log"
 
-            if $ACME_BIN --issue \
+            ACME_OUTPUT=$($ACME_BIN --issue \
               $FORCE_FLAG \
               --webroot "$WEBROOT_PATH" \
               --server letsencrypt \
-              $DOMAIN_ARGS 2>&1 | tee /tmp/acme_debug.log; then
+              $DOMAIN_ARGS 2>&1 || true)
+
+            echo "$ACME_OUTPUT" | tee /tmp/acme_debug.log
+
+            # Check if certificate was successfully issued or already exists and is valid
+            if echo "$ACME_OUTPUT" | grep -q "Cert success\|Domains not changed"; then
               echo "✅ Certificate successfully provisioned"
             else
               echo "❌ Certificate provisioning failed"
