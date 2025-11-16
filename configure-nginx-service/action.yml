@@ -159,10 +159,10 @@ runs:
           echo "   Directory: $NGINX_SITES_DIR"
           sudo ls -ld "$NGINX_SITES_DIR"
 
-          # Create the configuration file using a heredoc for better reliability
+          # Create the configuration file using cat with proper variable expansion
           echo "📝 Generating HTTP server configuration..."
           echo "   Output file: $CONFIG_FILE"
-          sudo tee "$CONFIG_FILE" > /dev/null <<NGINX_CONFIG
+          sudo bash -c "cat > $CONFIG_FILE" <<SHELLEOF
 # Service: $SERVICE_NAME
 server {
     listen 80;
@@ -174,20 +174,20 @@ server {
     # Let's Encrypt ACME challenge
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenges;
-        try_files \$uri =404;
+        try_files \\\$uri =404;
     }
 
     location $FINAL_LOCATION {
-        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
-        proxy_pass \$backend_upstream$PROXY_PASS_PATH;
+        set \\\$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
+        proxy_pass \\\$backend_upstream$PROXY_PASS_PATH;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade \\\$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \\\$http_upgrade;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
@@ -196,22 +196,24 @@ server {
         proxy_buffers 4 256k;
         proxy_busy_buffers_size 256k;
     }
-NGINX_CONFIG
+}
+SHELLEOF
 
           # Add health check location for path-based routing (only in HTTP server)
           if [ "$ROUTING_TYPE" = "path" ]; then
             echo "📝 Adding health check location..."
-            sudo tee -a "$CONFIG_FILE" > /dev/null <<NGINX_HEALTH
+            sudo bash -c "cat >> $CONFIG_FILE" <<'HEALTHEOF'
     location ${PATH_PREFIX}/health {
-        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
-        proxy_pass \$backend_upstream/health;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        set $backend_upstream http://${CONTAINER_NAME}:${CONTAINER_PORT};
+        proxy_pass $backend_upstream/health;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         access_log off;
     }
-NGINX_HEALTH
+}
+HEALTHEOF
           fi
 
           # Add SSL configuration if enabled
@@ -241,9 +243,7 @@ NGINX_HEALTH
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
             echo "✅ SSL is enabled and certificate paths are provided"
             # Append HTTPS server block
-            sudo tee -a "$CONFIG_FILE" > /dev/null <<NGINX_HTTPS
-}
-
+            sudo bash -c "cat >> $CONFIG_FILE" <<SSLEOF
 server {
     listen 443 ssl;
     http2 on;
@@ -260,19 +260,19 @@ server {
     # Let's Encrypt ACME challenge
     location /.well-known/acme-challenge/ {
         root /var/www/acme-challenges;
-        try_files \$uri =404;
+        try_files \\\$uri =404;
     }
 
     location $FINAL_LOCATION {
-        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
-        proxy_pass \$backend_upstream$PROXY_PASS_PATH;
+        set \\\$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
+        proxy_pass \\\$backend_upstream$PROXY_PASS_PATH;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade \\\$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_cache_bypass \\\$http_upgrade;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
@@ -282,30 +282,30 @@ server {
         proxy_buffers 4 256k;
         proxy_busy_buffers_size 256k;
     }
-NGINX_HTTPS
+SSLEOF
 
             # Add SSL health check for path-based routing
             if [ "$ROUTING_TYPE" = "path" ]; then
-              sudo tee -a "$CONFIG_FILE" > /dev/null <<NGINX_SSL_HEALTH
+              sudo bash -c "cat >> $CONFIG_FILE" <<'SSLHEALTHEOF'
     location ${PATH_PREFIX}/health {
-        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
-        proxy_pass \$backend_upstream/health;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        set $backend_upstream http://${CONTAINER_NAME}:${CONTAINER_PORT};
+        proxy_pass $backend_upstream/health;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         access_log off;
     }
-NGINX_SSL_HEALTH
+}
+SSLHEALTHEOF
+            else
+              # Close HTTPS server block (when not doing path-based routing)
+              echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
             fi
           else
             # Close HTTP server block only (no SSL)
-            echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
-          fi
-
-          # Close the HTTPS server block (only if SSL is enabled)
-          if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
-            echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            # Already closed in the initial HTTP block generation
+            true
           fi
 
           # Verify the configuration file was created properly
