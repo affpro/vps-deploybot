@@ -197,7 +197,7 @@ runs:
           # Install certificate to the target directory
           echo "📦 Installing certificate to $CERT_DIR..."
           LIVE_DIR="$CERT_DIR/live/$DOMAIN"
-          if ! mkdir -p "$LIVE_DIR"; then
+          if ! sudo mkdir -p "$LIVE_DIR"; then
             echo "❌ Failed to create certificate directory"
             exit 1
           fi
