@@ -152,8 +152,16 @@ runs:
           echo "   Server: $FINAL_SERVER_NAME"
           echo "   Location: $FINAL_LOCATION"
 
+          # Ensure directory exists and is writable
+          echo "📁 Checking nginx configuration directory..."
+          sudo mkdir -p "$NGINX_SITES_DIR"
+          sudo chmod 755 "$NGINX_SITES_DIR"
+          echo "   Directory: $NGINX_SITES_DIR"
+          sudo ls -ld "$NGINX_SITES_DIR"
+
           # Create the configuration file using a heredoc for better reliability
           echo "📝 Generating HTTP server configuration..."
+          echo "   Output file: $CONFIG_FILE"
           sudo tee "$CONFIG_FILE" > /dev/null <<NGINX_CONFIG
 # Service: $SERVICE_NAME
 server {
@@ -300,7 +308,13 @@ NGINX_SSL_HEALTH
             echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
           fi
 
+          # Verify the configuration file was created properly
           echo "✅ Configuration file created: $CONFIG_FILE"
+          echo "📊 File verification:"
+          echo "   Size: $(sudo wc -c < "$CONFIG_FILE") bytes"
+          echo "   Lines: $(sudo wc -l < "$CONFIG_FILE") lines"
+          echo "   First 10 lines:"
+          sudo head -10 "$CONFIG_FILE" | sed 's/^/     /'
 
           # Test nginx configuration
           echo "🔍 Testing nginx configuration..."
