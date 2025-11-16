@@ -221,18 +221,49 @@ runs:
           # The install-cert command may fail even if files are created correctly
           # Check if certificate files were actually created regardless of exit code
           if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+            echo "📋 Certificate files not found at target location, searching acme.sh storage..."
+
             # If files don't exist, try copying from acme.sh storage
-            ACME_CERT_DIR="$ACME_DIR/${DOMAIN}_ecc"
-            if [ ! -d "$ACME_CERT_DIR" ]; then
+            # acme.sh may store certificates in {domain}_ecc or {domain} directory
+            ACME_CERT_DIR=""
+            if [ -d "$ACME_DIR/${DOMAIN}_ecc" ]; then
+              ACME_CERT_DIR="$ACME_DIR/${DOMAIN}_ecc"
+            elif [ -d "$ACME_DIR/$DOMAIN" ]; then
               ACME_CERT_DIR="$ACME_DIR/$DOMAIN"
             fi
 
-            if [ -f "$ACME_CERT_DIR/fullchain.cer" ] && [ -f "$ACME_CERT_DIR/$DOMAIN.key" ]; then
-              echo "📋 Copying certificate from acme.sh storage..."
-              sudo cp "$ACME_CERT_DIR/fullchain.cer" "$CERT_PATH"
-              sudo cp "$ACME_CERT_DIR/$DOMAIN.key" "$KEY_PATH"
+            if [ -n "$ACME_CERT_DIR" ]; then
+              echo "📁 Found acme.sh storage at: $ACME_CERT_DIR"
+
+              # List available files for debugging
+              echo "   Available files:"
+              ls -la "$ACME_CERT_DIR" 2>/dev/null | grep -E '\.(cer|pem|key)' | awk '{print "     " $NF}' || true
+
+              # Find the actual certificate and key files
+              # acme.sh stores: fullchain.cer, {domain}.key (or {domain}.crt, ca.cer)
+              CERT_SRC=""
+              KEY_SRC=""
+
+              # Try different naming patterns
+              [ -f "$ACME_CERT_DIR/fullchain.cer" ] && CERT_SRC="$ACME_CERT_DIR/fullchain.cer"
+              [ -f "$ACME_CERT_DIR/$DOMAIN.cer" ] && CERT_SRC="$ACME_CERT_DIR/$DOMAIN.cer"
+              [ -f "$ACME_CERT_DIR/$DOMAIN.crt" ] && CERT_SRC="$ACME_CERT_DIR/$DOMAIN.crt"
+
+              [ -f "$ACME_CERT_DIR/$DOMAIN.key" ] && KEY_SRC="$ACME_CERT_DIR/$DOMAIN.key"
+
+              if [ -n "$CERT_SRC" ] && [ -n "$KEY_SRC" ]; then
+                echo "📋 Copying certificate from acme.sh storage..."
+                echo "   Source cert: $CERT_SRC"
+                echo "   Source key: $KEY_SRC"
+                sudo cp "$CERT_SRC" "$CERT_PATH"
+                sudo cp "$KEY_SRC" "$KEY_PATH"
+              else
+                echo "❌ Could not find certificate files in acme.sh storage"
+                echo "   Looking for fullchain.cer or {domain}.cer and {domain}.key"
+                exit 1
+              fi
             else
-              echo "❌ Failed to install certificate"
+              echo "❌ Could not find acme.sh certificate directory"
               exit 1
             fi
           fi
