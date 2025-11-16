@@ -240,26 +240,50 @@ runs:
               ls -la "$ACME_CERT_DIR" 2>/dev/null | grep -E '\.(cer|pem|key)' | awk '{print "     " $NF}' || true
 
               # Find the actual certificate and key files
-              # acme.sh stores: fullchain.cer, {domain}.key (or {domain}.crt, ca.cer)
+              # acme.sh stores: fullchain.cer (full chain), {domain}.cer (leaf), {domain}.key (private key)
               CERT_SRC=""
               KEY_SRC=""
 
-              # Try different naming patterns
-              [ -f "$ACME_CERT_DIR/fullchain.cer" ] && CERT_SRC="$ACME_CERT_DIR/fullchain.cer"
-              [ -f "$ACME_CERT_DIR/$DOMAIN.cer" ] && CERT_SRC="$ACME_CERT_DIR/$DOMAIN.cer"
-              [ -f "$ACME_CERT_DIR/$DOMAIN.crt" ] && CERT_SRC="$ACME_CERT_DIR/$DOMAIN.crt"
+              # Prefer fullchain.cer as it includes the full certificate chain
+              if [ -f "$ACME_CERT_DIR/fullchain.cer" ]; then
+                CERT_SRC="$ACME_CERT_DIR/fullchain.cer"
+              elif [ -f "$ACME_CERT_DIR/$DOMAIN.cer" ]; then
+                CERT_SRC="$ACME_CERT_DIR/$DOMAIN.cer"
+              elif [ -f "$ACME_CERT_DIR/$DOMAIN.crt" ]; then
+                CERT_SRC="$ACME_CERT_DIR/$DOMAIN.crt"
+              fi
 
-              [ -f "$ACME_CERT_DIR/$DOMAIN.key" ] && KEY_SRC="$ACME_CERT_DIR/$DOMAIN.key"
+              # Find the key file
+              if [ -f "$ACME_CERT_DIR/$DOMAIN.key" ]; then
+                KEY_SRC="$ACME_CERT_DIR/$DOMAIN.key"
+              fi
 
               if [ -n "$CERT_SRC" ] && [ -n "$KEY_SRC" ]; then
                 echo "📋 Copying certificate from acme.sh storage..."
-                echo "   Source cert: $CERT_SRC"
-                echo "   Source key: $KEY_SRC"
-                sudo cp "$CERT_SRC" "$CERT_PATH"
-                sudo cp "$KEY_SRC" "$KEY_PATH"
+                echo "   Source cert: $CERT_SRC → $CERT_PATH"
+                echo "   Source key: $KEY_SRC → $KEY_PATH"
+
+                # Ensure parent directory exists and has correct permissions
+                sudo mkdir -p "$(dirname "$CERT_PATH")" || true
+                sudo chmod 755 "$(dirname "$CERT_PATH")" || true
+
+                # Copy files with error checking
+                if sudo cp "$CERT_SRC" "$CERT_PATH" 2>&1; then
+                  echo "   ✅ Certificate copied"
+                else
+                  echo "   ❌ Failed to copy certificate"
+                  exit 1
+                fi
+
+                if sudo cp "$KEY_SRC" "$KEY_PATH" 2>&1; then
+                  echo "   ✅ Key copied"
+                else
+                  echo "   ❌ Failed to copy key"
+                  exit 1
+                fi
               else
                 echo "❌ Could not find certificate files in acme.sh storage"
-                echo "   Looking for fullchain.cer or {domain}.cer and {domain}.key"
+                echo "   Looking for fullchain.cer and {domain}.key"
                 exit 1
               fi
             else
