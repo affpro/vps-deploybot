@@ -333,13 +333,13 @@ runs:
           echo "   Cert Path: $CERT_PATH"
           echo "   Key Path: $KEY_PATH"
 
-          # Show expiration date
-          EXPIRY=$(openssl x509 -enddate -noout -in "$CERT_PATH" | cut -d= -f2)
+          # Show expiration date (use sudo since file is root-owned)
+          EXPIRY=$(sudo openssl x509 -enddate -noout -in "$CERT_PATH" 2>/dev/null | cut -d= -f2 || echo "Unable to read")
           echo "   Expires: $EXPIRY"
 
-          # Show all domains in certificate
+          # Show all domains in certificate (use sudo since file is root-owned)
           echo "   Domains in Certificate:"
-          openssl x509 -noout -text -in "$CERT_PATH" | grep -A1 "Subject Alternative Name" | tail -1 | sed 's/DNS://g' | tr ',' '\n' | sed 's/^ */     - /' || true
+          sudo openssl x509 -noout -text -in "$CERT_PATH" 2>/dev/null | grep -A1 "Subject Alternative Name" | tail -1 | sed 's/DNS://g' | tr ',' '\n' | sed 's/^ */     - /' || true
 
           echo ""
           echo "🎉 Ready to use with nginx or other services!"
