@@ -188,7 +188,7 @@ runs:
           sudo bash -c "echo '        proxy_busy_buffers_size 256k;' >> $CONFIG_FILE"
           sudo bash -c "echo '    }' >> $CONFIG_FILE"
 
-          # Add health check location for path-based routing
+          # Add health check location for path-based routing (only in HTTP server)
           if [ "$ROUTING_TYPE" = "path" ]; then
             sudo bash -c "echo '    location ${PATH_PREFIX}/health {' >> $CONFIG_FILE"
             sudo bash -c "echo '        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;' >> $CONFIG_FILE"
@@ -218,7 +218,10 @@ runs:
           fi
 
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
+            # Close HTTP server block before starting HTTPS
             sudo bash -c "echo '}' >> $CONFIG_FILE"
+            # Start HTTPS server block
+            sudo bash -c "echo '' >> $CONFIG_FILE"
             sudo bash -c "echo 'server {' >> $CONFIG_FILE"
             sudo bash -c "echo '    listen 443 ssl;' >> $CONFIG_FILE"
             sudo bash -c "echo '    http2 on;' >> $CONFIG_FILE"
@@ -274,6 +277,8 @@ runs:
           fi
 
           # Close the server block
+          # If SSL is enabled, this closes the HTTPS server block
+          # If SSL is disabled, this closes the HTTP server block
           echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
 
           echo "✅ Configuration file created: $CONFIG_FILE"
