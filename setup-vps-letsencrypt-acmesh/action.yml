@@ -299,11 +299,12 @@ runs:
           sudo chmod 600 "$KEY_PATH" 2>/dev/null || true
 
           # Verify certificate exists with retry logic (filesystem sync may take a moment)
+          # Use sudo for verification since the directory is owned by root
           echo "✅ Verifying certificate installation..."
           MAX_ATTEMPTS=5
           ATTEMPT=1
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-            if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+            if sudo test -f "$CERT_PATH" && sudo test -f "$KEY_PATH"; then
               echo "   ✅ Certificate files verified on attempt $ATTEMPT"
               break
             fi
@@ -314,13 +315,13 @@ runs:
             fi
           done
 
-          if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+          if ! sudo test -f "$CERT_PATH" || ! sudo test -f "$KEY_PATH"; then
             echo "❌ Certificate files not found at expected paths after verification"
             echo "   Expected cert: $CERT_PATH"
             echo "   Expected key: $KEY_PATH"
             echo ""
             echo "Debugging info:"
-            ls -la "$(dirname "$CERT_PATH")" 2>&1 || true
+            sudo ls -la "$(dirname "$CERT_PATH")" 2>&1 || true
             exit 1
           fi
 
