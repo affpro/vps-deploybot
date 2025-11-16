@@ -133,6 +133,7 @@ runs:
             -v "$NGINX_SITES_DIR:/etc/nginx/sites-enabled:ro" \
             -v "$NGINX_SSL_DIR:/etc/nginx/ssl:ro" \
             -v "/etc/letsencrypt:/etc/nginx/letsencrypt:ro" \
+            -v "/var/www/acme-challenges:/var/www/acme-challenges:ro" \
             nginx:alpine
 
           echo "✅ Nginx container started successfully!"
