@@ -350,10 +350,11 @@ runs:
       id: cert-paths
       shell: bash
       run: |
+        # Get paths from remote server and output them
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "CERT_DIR='${{ inputs.certificates_dir }}' DOMAIN='${{ inputs.domain }}' bash -s" <<-'EOF'
+          "CERT_DIR='${{ inputs.certificates_dir }}' DOMAIN='${{ inputs.domain }}' bash -s" <<-'EOFCHECK'
           set -euo pipefail
 
           CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
@@ -362,19 +363,23 @@ runs:
 
           # Use sudo test since files are root-owned
           if sudo test -f "$CERT_PATH" && sudo test -f "$KEY_PATH"; then
-            echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
-            echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
-            echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
-            echo "✅ Paths exported for subsequent steps"
+            echo "CERT_PATH=$CERT_PATH"
+            echo "KEY_PATH=$KEY_PATH"
+            echo "CERT_DIR=$CERT_LIVE_DIR"
+            echo "✅ Paths verified on remote server"
           else
             echo "❌ Certificate paths not found"
             echo "   Expected cert: $CERT_PATH"
             echo "   Expected key: $KEY_PATH"
-            echo "   Debugging:"
-            sudo ls -la "$CERT_DIR/live/$DOMAIN" 2>&1 || echo "Directory not accessible"
             exit 1
           fi
-        EOF
+        EOFCHECK
+
+        # Export outputs to GitHub Actions
+        echo "cert_path=${{ inputs.certificates_dir }}/live/${{ inputs.domain }}/fullchain.pem" >> $GITHUB_OUTPUT
+        echo "key_path=${{ inputs.certificates_dir }}/live/${{ inputs.domain }}/privkey.pem" >> $GITHUB_OUTPUT
+        echo "cert_dir=${{ inputs.certificates_dir }}/live/${{ inputs.domain }}" >> $GITHUB_OUTPUT
+        echo "✅ Paths exported for subsequent steps"
 
     - name: Restart nginx Docker container (if needed)
       shell: bash
