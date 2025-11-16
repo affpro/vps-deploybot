@@ -159,61 +159,57 @@ runs:
           echo "   Directory: $NGINX_SITES_DIR"
           sudo ls -ld "$NGINX_SITES_DIR"
 
-          # Create the configuration file using cat with proper variable expansion
+          # Create the configuration file using echo commands
           echo "📝 Generating HTTP server configuration..."
           echo "   Output file: $CONFIG_FILE"
-          sudo bash -c "cat > $CONFIG_FILE" <<SHELLEOF
-# Service: $SERVICE_NAME
-server {
-    listen 80;
-    server_name $FINAL_SERVER_NAME;
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
 
-    # Let's Encrypt ACME challenge
-    location /.well-known/acme-challenge/ {
-        root /var/www/acme-challenges;
-        try_files \\\$uri =404;
-    }
-
-    location $FINAL_LOCATION {
-        set \\\$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
-        proxy_pass \\\$backend_upstream$PROXY_PASS_PATH;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_cache_bypass \\\$http_upgrade;
-        proxy_set_header Host \\\$host;
-        proxy_set_header X-Real-IP \\\$remote_addr;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \\\$scheme;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering on;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-        proxy_busy_buffers_size 256k;
-    }
-}
-SHELLEOF
+          # Start with HTTP server block
+          echo "# Service: $SERVICE_NAME" | sudo tee "$CONFIG_FILE" > /dev/null
+          echo "server {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    listen 80;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    server_name $FINAL_SERVER_NAME;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    add_header X-Frame-Options DENY;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    add_header X-Content-Type-Options nosniff;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    add_header X-XSS-Protection \"1; mode=block\";" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    # Let's Encrypt ACME challenge" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    location /.well-known/acme-challenge/ {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        root /var/www/acme-challenges;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        try_files \$uri =404;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    location $FINAL_LOCATION {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_pass \$backend_upstream$PROXY_PASS_PATH;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_http_version 1.1;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_set_header Upgrade \$http_upgrade;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_set_header Connection 'upgrade';" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_cache_bypass \$http_upgrade;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_set_header Host \$host;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_set_header X-Real-IP \$remote_addr;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_set_header X-Forwarded-Proto \$scheme;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_connect_timeout 60s;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_send_timeout 60s;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_read_timeout 60s;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_buffering on;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_buffer_size 128k;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_buffers 4 256k;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "        proxy_busy_buffers_size 256k;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+          echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
 
           # Add health check location for path-based routing (only in HTTP server)
           if [ "$ROUTING_TYPE" = "path" ]; then
             echo "📝 Adding health check location..."
-            sudo bash -c "cat >> $CONFIG_FILE" <<'HEALTHEOF'
-    location ${PATH_PREFIX}/health {
-        set $backend_upstream http://${CONTAINER_NAME}:${CONTAINER_PORT};
-        proxy_pass $backend_upstream/health;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        access_log off;
-    }
-}
-HEALTHEOF
+            echo "    location ${PATH_PREFIX}/health {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_pass \$backend_upstream/health;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header Host \$host;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header X-Real-IP \$remote_addr;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header X-Forwarded-Proto \$scheme;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        access_log off;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
           fi
 
           # Add SSL configuration if enabled
@@ -243,69 +239,62 @@ HEALTHEOF
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
             echo "✅ SSL is enabled and certificate paths are provided"
             # Append HTTPS server block
-            sudo bash -c "cat >> $CONFIG_FILE" <<SSLEOF
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name $FINAL_SERVER_NAME;
-    ssl_certificate $SSL_CERT_PATH;
-    ssl_certificate_key $SSL_KEY_PATH;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-
-    # Let's Encrypt ACME challenge
-    location /.well-known/acme-challenge/ {
-        root /var/www/acme-challenges;
-        try_files \\\$uri =404;
-    }
-
-    location $FINAL_LOCATION {
-        set \\\$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;
-        proxy_pass \\\$backend_upstream$PROXY_PASS_PATH;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_cache_bypass \\\$http_upgrade;
-        proxy_set_header Host \\\$host;
-        proxy_set_header X-Real-IP \\\$remote_addr;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_buffering on;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-        proxy_busy_buffers_size 256k;
-    }
-SSLEOF
+            echo "server {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    listen 443 ssl;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    http2 on;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    server_name $FINAL_SERVER_NAME;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    ssl_certificate $SSL_CERT_PATH;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    ssl_certificate_key $SSL_KEY_PATH;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    ssl_protocols TLSv1.2 TLSv1.3;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    add_header X-Frame-Options DENY;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    add_header X-Content-Type-Options nosniff;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    add_header X-XSS-Protection \"1; mode=block\";" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    # Let's Encrypt ACME challenge" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    location /.well-known/acme-challenge/ {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        root /var/www/acme-challenges;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        try_files \$uri =404;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    location $FINAL_LOCATION {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_pass \$backend_upstream$PROXY_PASS_PATH;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_http_version 1.1;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header Upgrade \$http_upgrade;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header Connection 'upgrade';" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_cache_bypass \$http_upgrade;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header Host \$host;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header X-Real-IP \$remote_addr;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_set_header X-Forwarded-Proto https;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_connect_timeout 60s;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_send_timeout 60s;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_read_timeout 60s;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_buffering on;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_buffer_size 128k;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_buffers 4 256k;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "        proxy_busy_buffers_size 256k;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+            echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
 
             # Add SSL health check for path-based routing
             if [ "$ROUTING_TYPE" = "path" ]; then
-              sudo bash -c "cat >> $CONFIG_FILE" <<'SSLHEALTHEOF'
-    location ${PATH_PREFIX}/health {
-        set $backend_upstream http://${CONTAINER_NAME}:${CONTAINER_PORT};
-        proxy_pass $backend_upstream/health;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        access_log off;
-    }
-}
-SSLHEALTHEOF
-            else
-              # Close HTTPS server block (when not doing path-based routing)
-              echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "    location ${PATH_PREFIX}/health {" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        set \$backend_upstream http://$CONTAINER_NAME:$CONTAINER_PORT;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        proxy_pass \$backend_upstream/health;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        proxy_set_header Host \$host;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        proxy_set_header X-Real-IP \$remote_addr;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        proxy_set_header X-Forwarded-Proto https;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "        access_log off;" | sudo tee -a "$CONFIG_FILE" > /dev/null
+              echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
             fi
+            # Close HTTPS server block
+            echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
           else
             # Close HTTP server block only (no SSL)
-            # Already closed in the initial HTTP block generation
-            true
+            echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
           fi
 
           # Verify the configuration file was created properly
