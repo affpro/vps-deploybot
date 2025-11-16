@@ -360,13 +360,18 @@ runs:
           KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
           CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
 
-          if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+          # Use sudo test since files are root-owned
+          if sudo test -f "$CERT_PATH" && sudo test -f "$KEY_PATH"; then
             echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
             echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
             echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
             echo "✅ Paths exported for subsequent steps"
           else
             echo "❌ Certificate paths not found"
+            echo "   Expected cert: $CERT_PATH"
+            echo "   Expected key: $KEY_PATH"
+            echo "   Debugging:"
+            sudo ls -la "$CERT_DIR/live/$DOMAIN" 2>&1 || echo "Directory not accessible"
             exit 1
           fi
         EOF
