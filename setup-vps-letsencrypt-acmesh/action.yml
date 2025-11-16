@@ -207,12 +207,34 @@ runs:
             exit 1
           fi
 
-          if ! $ACME_BIN --install-cert -d "$DOMAIN" \
+          # Install certificate - acme.sh will attempt to write to system directories
+          # We need to allow acme.sh to write to these directories
+          sudo chmod 755 "$LIVE_DIR" 2>/dev/null || true
+
+          INSTALL_OUTPUT=$($ACME_BIN --install-cert -d "$DOMAIN" \
             --key-file "$KEY_PATH" \
             --fullchain-file "$CERT_PATH" \
-            --reloadcmd "echo 'Certificate installed'" 2>/dev/null; then
-            echo "❌ Failed to install certificate"
-            exit 1
+            --reloadcmd "echo 'Certificate installed'" 2>&1 || true)
+
+          echo "$INSTALL_OUTPUT"
+
+          # The install-cert command may fail even if files are created correctly
+          # Check if certificate files were actually created regardless of exit code
+          if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+            # If files don't exist, try copying from acme.sh storage
+            ACME_CERT_DIR="$ACME_DIR/${DOMAIN}_ecc"
+            if [ ! -d "$ACME_CERT_DIR" ]; then
+              ACME_CERT_DIR="$ACME_DIR/$DOMAIN"
+            fi
+
+            if [ -f "$ACME_CERT_DIR/fullchain.cer" ] && [ -f "$ACME_CERT_DIR/$DOMAIN.key" ]; then
+              echo "📋 Copying certificate from acme.sh storage..."
+              sudo cp "$ACME_CERT_DIR/fullchain.cer" "$CERT_PATH"
+              sudo cp "$ACME_CERT_DIR/$DOMAIN.key" "$KEY_PATH"
+            else
+              echo "❌ Failed to install certificate"
+              exit 1
+            fi
           fi
 
           # Verify certificate exists
