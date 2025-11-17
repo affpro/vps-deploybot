@@ -38,6 +38,10 @@ inputs:
     description: "Request a wildcard certificate (*.domain) in addition to the domain (set to 'false' to disable)"
     required: false
     default: "true"
+  hetzner_dns_token:
+    description: "Hetzner DNS API token for DNS-01 validation (required for wildcard certificates)"
+    required: false
+    default: ""
 
 outputs:
   cert_path:
@@ -63,11 +67,12 @@ runs:
         WEBROOT_PATH: "${{ inputs.webroot_path }}"
         FORCE_RENEWAL: "${{ inputs.force_renewal }}"
         USE_WILDCARD: "${{ inputs.use_wildcard }}"
+        HETZNER_DNS_TOKEN: "${{ inputs.hetzner_dns_token }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' WEBROOT_PATH='$WEBROOT_PATH' FORCE_RENEWAL='$FORCE_RENEWAL' USE_WILDCARD='$USE_WILDCARD' bash -s" <<-'EOF'
+          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' WEBROOT_PATH='$WEBROOT_PATH' FORCE_RENEWAL='$FORCE_RENEWAL' USE_WILDCARD='$USE_WILDCARD' HETZNER_DNS_TOKEN='$HETZNER_DNS_TOKEN' bash -s" <<-'EOF'
           set -euo pipefail
 
           echo "🔐 Provisioning SSL certificate with Let's Encrypt (acme.sh with Webroot)"
@@ -194,16 +199,36 @@ runs:
 
           # Issue or regenerate certificate if needed
           if [ ! -f "$CERT_PATH" ] || [ "$FORCE_RENEWAL" = "true" ] || [ "$NEEDS_RENEWAL" = "true" ]; then
-            # Request new certificate using webroot HTTP-01 challenge
+            # Request new certificate
             echo "🚀 Requesting new certificate from Let's Encrypt..."
-            echo "Setting up HTTP-01 validation (via webroot)..."
             ACME_LOG="$ACME_DIR/${DOMAIN}/${DOMAIN}.log"
 
-            ACME_OUTPUT=$($ACME_BIN --issue \
-              $FORCE_FLAG \
-              --webroot "$WEBROOT_PATH" \
-              --server letsencrypt \
-              $DOMAIN_ARGS 2>&1 || true)
+            # Use DNS-01 for wildcard certificates, HTTP-01 (webroot) for others
+            if [ "$USE_WILDCARD" = "true" ]; then
+              echo "Setting up DNS-01 validation (required for wildcard)..."
+
+              # Validate Hetzner DNS token is provided
+              if [ -z "$HETZNER_DNS_TOKEN" ]; then
+                echo "❌ Hetzner DNS token is required for wildcard certificates"
+                exit 1
+              fi
+
+              # Export token for acme.sh Hetzner plugin (requires HETZNER_Token with capital T)
+              export HETZNER_Token="$HETZNER_DNS_TOKEN"
+
+              ACME_OUTPUT=$($ACME_BIN --issue \
+                $FORCE_FLAG \
+                --dns dns_hetzner \
+                --server letsencrypt \
+                $DOMAIN_ARGS 2>&1 || true)
+            else
+              echo "Setting up HTTP-01 validation (via webroot)..."
+              ACME_OUTPUT=$($ACME_BIN --issue \
+                $FORCE_FLAG \
+                --webroot "$WEBROOT_PATH" \
+                --server letsencrypt \
+                $DOMAIN_ARGS 2>&1 || true)
+            fi
 
             echo "$ACME_OUTPUT" | tee /tmp/acme_debug.log
 
