@@ -139,7 +139,13 @@ runs:
             for dom in "${DOMAINS[@]}"; do
               dom=$(echo "$dom" | xargs)  # Trim whitespace
               if [ -n "$dom" ]; then
-                DOMAIN_ARGS="$DOMAIN_ARGS -d $dom"
+                # Skip if wildcard is requested and this domain is a subdomain of the main domain
+                # (e.g., skip api.ordus.si if we're requesting *.ordus.si)
+                if [ "$USE_WILDCARD" = "true" ] && [[ "$dom" == *".$DOMAIN" ]]; then
+                  echo "   Skipping redundant domain: $dom (covered by *.$DOMAIN)"
+                else
+                  DOMAIN_ARGS="$DOMAIN_ARGS -d $dom"
+                fi
               fi
             done
           fi
