@@ -34,6 +34,10 @@ inputs:
     description: "Force certificate renewal even if valid (set to 'true' to renew)"
     required: false
     default: "false"
+  use_wildcard:
+    description: "Request a wildcard certificate (*.domain) in addition to the domain (set to 'false' to disable)"
+    required: false
+    default: "true"
 
 outputs:
   cert_path:
@@ -58,11 +62,12 @@ runs:
         CERT_DIR: "${{ inputs.certificates_dir }}"
         WEBROOT_PATH: "${{ inputs.webroot_path }}"
         FORCE_RENEWAL: "${{ inputs.force_renewal }}"
+        USE_WILDCARD: "${{ inputs.use_wildcard }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' WEBROOT_PATH='$WEBROOT_PATH' FORCE_RENEWAL='$FORCE_RENEWAL' bash -s" <<-'EOF'
+          "DOMAIN='$DOMAIN' ADDITIONAL_DOMAINS='$ADDITIONAL_DOMAINS' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' WEBROOT_PATH='$WEBROOT_PATH' FORCE_RENEWAL='$FORCE_RENEWAL' USE_WILDCARD='$USE_WILDCARD' bash -s" <<-'EOF'
           set -euo pipefail
 
           echo "🔐 Provisioning SSL certificate with Let's Encrypt (acme.sh with Webroot)"
@@ -121,6 +126,13 @@ runs:
 
           # Build domain list for acme.sh
           DOMAIN_ARGS="-d $DOMAIN"
+
+          # Add wildcard domain if requested
+          if [ "$USE_WILDCARD" = "true" ]; then
+            echo "   Adding wildcard domain: *.$DOMAIN"
+            DOMAIN_ARGS="$DOMAIN_ARGS -d *.$DOMAIN"
+          fi
+
           if [ -n "$ADDITIONAL_DOMAINS" ]; then
             # Convert comma-separated list to multiple -d flags
             IFS=',' read -ra DOMAINS <<< "$ADDITIONAL_DOMAINS"
@@ -136,23 +148,46 @@ runs:
           CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
           KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
           FORCE_FLAG=""
+          NEEDS_RENEWAL=false
 
           if [ "$FORCE_RENEWAL" = "true" ]; then
             echo "🔄 Force renewal requested"
             FORCE_FLAG="--force"
+            NEEDS_RENEWAL=true
           fi
 
-          # Issue or renew certificate
+          # Check if certificate exists and has wildcard if required
           if [ -f "$CERT_PATH" ] && [ "$FORCE_RENEWAL" != "true" ]; then
             echo "ℹ️  Certificate already exists for $DOMAIN"
             echo "   Path: $CERT_PATH"
-            echo "🔄 Attempting renewal if certificate is near expiration..."
 
-            # acme.sh automatically handles renewal
-            if $ACME_BIN --renew $FORCE_FLAG -d "$DOMAIN" 2>/dev/null || true; then
-              echo "✅ Certificate renewal checked"
+            # Check if wildcard domain is in the certificate
+            if [ "$USE_WILDCARD" = "true" ]; then
+              if sudo openssl x509 -noout -text -in "$CERT_PATH" 2>/dev/null | grep -q "*\.$DOMAIN"; then
+                echo "✅ Certificate includes wildcard domain (*.$DOMAIN)"
+                echo "🔄 Skipping regeneration - wildcard certificate already exists"
+                NEEDS_RENEWAL=false
+              else
+                echo "⚠️  Certificate does NOT include wildcard domain (*.$DOMAIN)"
+                echo "🔄 Regenerating certificate to add wildcard..."
+                NEEDS_RENEWAL=true
+                FORCE_FLAG="--force"
+              fi
+            else
+              echo "🔄 Attempting renewal if certificate is near expiration..."
+              NEEDS_RENEWAL=false
             fi
-          else
+
+            # Attempt renewal if needed or if acme.sh determines it's necessary
+            if [ "$NEEDS_RENEWAL" = "false" ]; then
+              if $ACME_BIN --renew $FORCE_FLAG -d "$DOMAIN" 2>/dev/null || true; then
+                echo "✅ Certificate renewal checked"
+              fi
+            fi
+          fi
+
+          # Issue or regenerate certificate if needed
+          if [ ! -f "$CERT_PATH" ] || [ "$FORCE_RENEWAL" = "true" ] || [ "$NEEDS_RENEWAL" = "true" ]; then
             # Request new certificate using webroot HTTP-01 challenge
             echo "🚀 Requesting new certificate from Let's Encrypt..."
             echo "Setting up HTTP-01 validation (via webroot)..."
