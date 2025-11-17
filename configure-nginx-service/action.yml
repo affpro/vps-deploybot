@@ -212,6 +212,9 @@ runs:
             echo "    }" | sudo tee -a "$CONFIG_FILE" > /dev/null
           fi
 
+          # Close HTTP server block
+          echo "}" | sudo tee -a "$CONFIG_FILE" > /dev/null
+
           # Add SSL configuration if enabled
           echo "🔐 SSL Configuration Check:"
           echo "   ENABLE_SSL=$ENABLE_SSL"
@@ -251,6 +254,7 @@ runs:
           if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
             echo "✅ SSL is enabled and certificate paths are provided"
             # Append HTTPS server block
+            echo "" | sudo tee -a "$CONFIG_FILE" > /dev/null
             echo "server {" | sudo tee -a "$CONFIG_FILE" > /dev/null
             echo "    listen 443 ssl;" | sudo tee -a "$CONFIG_FILE" > /dev/null
             echo "    http2 on;" | sudo tee -a "$CONFIG_FILE" > /dev/null
