@@ -35,9 +35,9 @@ inputs:
     required: false
     default: "false"
   use_wildcard:
-    description: "Request a wildcard certificate (*.domain) in addition to the domain (set to 'false' to disable)"
+    description: "Request a wildcard certificate (*.domain) in addition to the domain (set to 'true' to enable - requires DNS-01)"
     required: false
-    default: "true"
+    default: "false"
   hetzner_dns_token:
     description: "Hetzner DNS API token for DNS-01 validation (required for wildcard certificates)"
     required: false
