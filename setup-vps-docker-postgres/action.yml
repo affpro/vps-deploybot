@@ -173,14 +173,24 @@ runs:
           POSTGRES_ADMIN_PASS="$3"
           CONTAINER=postgres_container
 
-          # Clean up existing pg_hba.conf host entries and configure fresh access
-          echo "🧹 Cleaning up existing PostgreSQL host access entries..."
+          # Backup existing pg_hba.conf and preserve existing host entries
+          echo "🧹 Backing up existing PostgreSQL host access entries..."
           sudo docker exec "$CONTAINER" bash -c \
             "cp /var/lib/postgresql/data/pg_hba.conf /var/lib/postgresql/data/pg_hba.conf.backup 2>/dev/null || true"
 
-          # Remove all existing host entries (lines starting with 'host')
-          sudo docker exec "$CONTAINER" bash -c \
-            "sed -i '/^host /d' /var/lib/postgresql/data/pg_hba.conf"
+          # Check if host entries already exist for admin user on localhost
+          echo "🔍 Checking for existing admin user host entries..."
+          admin_localhost_exists=$(sudo docker exec "$CONTAINER" bash -c \
+            "grep -c \"^host all $POSTGRES_ADMIN_USER 127.0.0.1/32\" /var/lib/postgresql/data/pg_hba.conf || echo 0")
+
+          # Only add local admin entry if it doesn't exist
+          if [ "$admin_localhost_exists" -eq 0 ]; then
+            echo "➡ Adding local access for admin user: $POSTGRES_ADMIN_USER"
+            sudo docker exec "$CONTAINER" bash -c \
+              "echo 'host all $POSTGRES_ADMIN_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+          else
+            echo "✅ Admin user localhost entry already exists"
+          fi
 
           if [ -n "$ALLOWED_IPS" ]; then
             echo "🔎 Configuring PostgreSQL for remote access: $ALLOWED_IPS"
@@ -193,19 +203,23 @@ runs:
             sudo docker exec "$CONTAINER" bash -c \
               "touch /var/lib/postgresql/data/pg_hba.conf && chown postgres:postgres /var/lib/postgresql/data/pg_hba.conf"
 
-            # Add local host entry for admin user (needed for configuration commands)
-            echo "➡ Adding local access for admin user: $POSTGRES_ADMIN_USER"
-            sudo docker exec "$CONTAINER" bash -c \
-              "echo 'host all $POSTGRES_ADMIN_USER 127.0.0.1/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
-
-            # Add host entries for each allowed IP
+            # Add host entries for each allowed IP only if they don't already exist
             IFS=',' read -r -a ip_array <<< "$ALLOWED_IPS"
             for ip in "${ip_array[@]}"; do
               ip=$(echo "$ip" | xargs)
               [ -z "$ip" ] && continue
-              echo "➡ Adding PostgreSQL access for IP: $ip"
-              sudo docker exec "$CONTAINER" bash -c \
-                "echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+
+              # Check if this IP entry already exists
+              ip_entry_exists=$(sudo docker exec "$CONTAINER" bash -c \
+                "grep -c \"^host all all $ip/32 md5\" /var/lib/postgresql/data/pg_hba.conf || echo 0")
+
+              if [ "$ip_entry_exists" -eq 0 ]; then
+                echo "➡ Adding PostgreSQL access for IP: $ip"
+                sudo docker exec "$CONTAINER" bash -c \
+                  "echo 'host all all $ip/32 md5' >> /var/lib/postgresql/data/pg_hba.conf"
+              else
+                echo "✅ PostgreSQL access for IP $ip already exists"
+              fi
             done
 
             # Restart PostgreSQL to apply configuration changes
