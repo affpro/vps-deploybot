@@ -40,5 +40,7 @@ http {
     add_header X-Content-Type-Options nosniff;
     add_header X-XSS-Protection "1; mode=block";
 
+    # Include individual service configurations
+    # NOTE: The default_server is defined in 00-acme-challenge.conf to avoid duplicates
     include /etc/nginx/sites-enabled/*.conf;
 }
