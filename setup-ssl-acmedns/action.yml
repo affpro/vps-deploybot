@@ -182,7 +182,7 @@ runs:
           ACMEDNS_CONFIG="/etc/letsencrypt/acmedns/acmedns.json"
 
           if sudo certbot certonly \
-            --dns-acmedns \
+            -a dns-acmedns \
             --dns-acmedns-credentials "$ACMEDNS_CONFIG" \
             --dns-acmedns-propagation-seconds 2 \
             --non-interactive \
