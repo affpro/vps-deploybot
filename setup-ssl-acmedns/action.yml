@@ -79,25 +79,16 @@ runs:
           # Create acmedns.json config file
           ACMEDNS_CONFIG="$ACMEDNS_CONFIG_DIR/acmedns.json"
 
-          # Build JSON config
-          cat > /tmp/acmedns.json <<'JSONEOF'
-{
-  "DOMAIN_PLACEHOLDER": {
-    "username": "USERNAME_PLACEHOLDER",
-    "password": "PASSWORD_PLACEHOLDER",
-    "fulldomain": "FULLDOMAIN_PLACEHOLDER",
-    "subdomain": "SUBDOMAIN_PLACEHOLDER",
-    "allowfrom": []
-  }
-}
-JSONEOF
-
-          # Replace placeholders with actual values
-          sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /tmp/acmedns.json
-          sed -i "s/USERNAME_PLACEHOLDER/$ACMEDNS_USERNAME/g" /tmp/acmedns.json
-          sed -i "s/PASSWORD_PLACEHOLDER/$ACMEDNS_PASSWORD/g" /tmp/acmedns.json
-          sed -i "s|FULLDOMAIN_PLACEHOLDER|$ACMEDNS_FULLDOMAIN|g" /tmp/acmedns.json
-          sed -i "s/SUBDOMAIN_PLACEHOLDER/$ACMEDNS_SUBDOMAIN/g" /tmp/acmedns.json
+          # Build JSON config using echo
+          echo "{" > /tmp/acmedns.json
+          echo "  \"$DOMAIN\": {" >> /tmp/acmedns.json
+          echo "    \"username\": \"$ACMEDNS_USERNAME\"," >> /tmp/acmedns.json
+          echo "    \"password\": \"$ACMEDNS_PASSWORD\"," >> /tmp/acmedns.json
+          echo "    \"fulldomain\": \"$ACMEDNS_FULLDOMAIN\"," >> /tmp/acmedns.json
+          echo "    \"subdomain\": \"$ACMEDNS_SUBDOMAIN\"," >> /tmp/acmedns.json
+          echo "    \"allowfrom\": []" >> /tmp/acmedns.json
+          echo "  }" >> /tmp/acmedns.json
+          echo "}" >> /tmp/acmedns.json
 
           sudo mv /tmp/acmedns.json "$ACMEDNS_CONFIG"
           sudo chmod 600 "$ACMEDNS_CONFIG"
