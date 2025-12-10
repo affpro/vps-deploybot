@@ -76,10 +76,10 @@ runs:
           ACMEDNS_CONFIG_DIR="/etc/letsencrypt/acmedns"
           sudo mkdir -p "$ACMEDNS_CONFIG_DIR"
 
-          # Create acmedns.json config file
-          ACMEDNS_CONFIG="$ACMEDNS_CONFIG_DIR/acmedns.json"
+          # Create acmedns.json registration file
+          ACMEDNS_REGISTRATION="$ACMEDNS_CONFIG_DIR/acmedns.json"
 
-          # Build JSON config using echo
+          # Build JSON registration file using echo
           echo "{" > /tmp/acmedns.json
           echo "  \"$DOMAIN\": {" >> /tmp/acmedns.json
           echo "    \"username\": \"$ACMEDNS_USERNAME\"," >> /tmp/acmedns.json
@@ -90,9 +90,20 @@ runs:
           echo "  }" >> /tmp/acmedns.json
           echo "}" >> /tmp/acmedns.json
 
-          sudo mv /tmp/acmedns.json "$ACMEDNS_CONFIG"
-          sudo chmod 600 "$ACMEDNS_CONFIG"
-          echo "✅ ACME-DNS credentials configured at $ACMEDNS_CONFIG"
+          sudo mv /tmp/acmedns.json "$ACMEDNS_REGISTRATION"
+          sudo chmod 600 "$ACMEDNS_REGISTRATION"
+
+          # Create credentials.ini file for certbot
+          ACMEDNS_CREDENTIALS="$ACMEDNS_CONFIG_DIR/credentials.ini"
+          echo "dns_acmedns_api_url = https://auth.acme-dns.io" > /tmp/credentials.ini
+          echo "dns_acmedns_registration_file = $ACMEDNS_REGISTRATION" >> /tmp/credentials.ini
+
+          sudo mv /tmp/credentials.ini "$ACMEDNS_CREDENTIALS"
+          sudo chmod 600 "$ACMEDNS_CREDENTIALS"
+
+          echo "✅ ACME-DNS credentials configured"
+          echo "   Registration: $ACMEDNS_REGISTRATION"
+          echo "   Credentials: $ACMEDNS_CREDENTIALS"
         EOF
 
     - name: Install certbot-dns-acmedns Plugin
@@ -179,11 +190,11 @@ runs:
 
           # Obtain certificate using ACME-DNS
           echo "🚀 Requesting certificate from Let's Encrypt (ACME-DNS validation)..."
-          ACMEDNS_CONFIG="/etc/letsencrypt/acmedns/acmedns.json"
+          ACMEDNS_CREDENTIALS="/etc/letsencrypt/acmedns/credentials.ini"
 
           if sudo certbot certonly \
             -a dns-acmedns \
-            --dns-acmedns-credentials "$ACMEDNS_CONFIG" \
+            --dns-acmedns-credentials "$ACMEDNS_CREDENTIALS" \
             --dns-acmedns-propagation-seconds 2 \
             --non-interactive \
             --agree-tos \
