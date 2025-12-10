@@ -145,16 +145,11 @@ runs:
             sudo apt-get install -y libxml2-utils
           fi
 
-          # Create temporary FreeDNS credentials file (will be deleted after renewal)
-          FREEDNS_CREDS="$HOOK_DIR/_auth_credentials.inc"
-          echo "🔑 Creating temporary FreeDNS credentials file"
-          cat <<CREDS | sudo tee "$FREEDNS_CREDS" > /dev/null
-USERNAME="$FREEDNS_USERNAME"
-PASSWORD="$FREEDNS_PASSWORD"
-DOMAIN="$DOMAIN"
-CREDS
-          sudo chmod 600 "$FREEDNS_CREDS"
-          echo "✅ Temporary credentials file created"
+          # Export credentials as environment variables (no file created)
+          export FREEDNS_USERNAME="$FREEDNS_USERNAME"
+          export FREEDNS_PASSWORD="$FREEDNS_PASSWORD"
+          export FREEDNS_DOMAIN="$DOMAIN"
+          echo "✅ Credentials exported as environment variables"
 
           # Build domain list for certbot
           DOMAIN_ARGS="-d $DOMAIN"
@@ -174,8 +169,7 @@ CREDS
 
           # Renew certificate with FreeDNS hook
           echo "🚀 Renewing certificate from Let's Encrypt..."
-          RENEWAL_SUCCESS=false
-          if sudo certbot certonly \
+          if sudo -E certbot certonly \
             --manual \
             --preferred-challenges dns \
             --manual-auth-hook "$HOOK_DIR/certbot-freedns_si.sh --auth" \
@@ -188,18 +182,8 @@ CREDS
             $FORCE_FLAG \
             $DOMAIN_ARGS; then
             echo "✅ Certificate successfully renewed"
-            RENEWAL_SUCCESS=true
           else
             echo "❌ Certificate renewal failed"
-          fi
-
-          # Clean up credentials file
-          echo "🧹 Removing temporary credentials file..."
-          sudo rm -f "$FREEDNS_CREDS"
-          echo "✅ Credentials file removed"
-
-          # Exit if renewal failed
-          if [ "$RENEWAL_SUCCESS" = false ]; then
             exit 1
           fi
 

@@ -178,18 +178,26 @@ case "$1" in
   ;;
 esac
 
-if [ ! -f "${WORKING_DIR}/${AUTH_FILENAME}" ]; then
-  echo "ERROR: Missing credentials file! Exiting ..."
+# Accept credentials from environment variables (preferred) or file (backward compatibility)
+if [ -n "${FREEDNS_USERNAME}" ] && [ -n "${FREEDNS_PASSWORD}" ] && [ -n "${FREEDNS_DOMAIN}" ]; then
+  # Use environment variables (no file needed)
+  USERNAME="${FREEDNS_USERNAME}"
+  PASSWORD="${FREEDNS_PASSWORD}"
+  DOMAIN="${FREEDNS_DOMAIN}"
+elif [ -f "${WORKING_DIR}/${AUTH_FILENAME}" ]; then
+  # Fall back to credentials file for backward compatibility
+  source ${WORKING_DIR}/${AUTH_FILENAME}
+else
+  echo "ERROR: Missing credentials! Set FREEDNS_USERNAME, FREEDNS_PASSWORD, FREEDNS_DOMAIN environment variables or provide ${AUTH_FILENAME} file. Exiting ..."
   exit 1
 fi
-source ${WORKING_DIR}/${AUTH_FILENAME}
+
 if [ -z "${USERNAME}" -o -z "${PASSWORD}" -o -z "${DOMAIN}" ]; then
   echo "ERROR: One of mandatory variables USERNAME, PASSWORD and DOMAIN is missing or not set properly! Exiting ..."
   exit 1
 fi
 
 # -- Runtime --
-source ${WORKING_DIR}/_auth_credentials.inc
 HOSTNAME_SUFFIX=""
 if [ "${CERTBOT_DOMAIN}" != "${DOMAIN}" ]; then
   HOSTNAME_SUFFIX=".$(echo "${CERTBOT_DOMAIN}" | sed -e s"|.${DOMAIN}$||")"
