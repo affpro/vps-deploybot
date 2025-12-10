@@ -118,7 +118,7 @@ runs:
           # Install certbot-dns-acmedns plugin
           if ! python3 -c "import certbot_dns_acmedns" 2>/dev/null; then
             echo "   Installing certbot-dns-acmedns plugin..."
-            sudo pip3 install certbot-dns-acmedns
+            sudo pip3 install --break-system-packages certbot-dns-acmedns
             echo "   ✅ Plugin installed successfully"
           else
             echo "   ✅ certbot-dns-acmedns already installed"
