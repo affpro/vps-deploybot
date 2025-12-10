@@ -1,0 +1,264 @@
+name: Setup SSL Certificate (ACME-DNS)
+description: "Provision and renew wildcard SSL certificates using acme-dns for instant DNS validation - perfect for slow DNS providers like FreeDNS.si"
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  domain:
+    description: "Primary domain for the certificate (e.g., taxi-laguna.com)"
+    required: true
+  wildcard:
+    description: "Include wildcard certificate (*.domain.com)"
+    required: false
+    default: "true"
+  acmedns_username:
+    description: "ACME-DNS username from registration (store as GitHub secret)"
+    required: true
+  acmedns_password:
+    description: "ACME-DNS password from registration (store as GitHub secret)"
+    required: true
+  acmedns_fulldomain:
+    description: "ACME-DNS full domain from registration (store as GitHub secret)"
+    required: true
+  acmedns_subdomain:
+    description: "ACME-DNS subdomain from registration (store as GitHub secret)"
+    required: true
+  email:
+    description: "Email for Let's Encrypt registration and renewal notices"
+    required: true
+  certificates_dir:
+    description: "Directory to store certificates on VPS (default: /etc/letsencrypt)"
+    required: false
+    default: "/etc/letsencrypt"
+  force_renewal:
+    description: "Force certificate renewal even if valid (set to 'true' to renew)"
+    required: false
+    default: "false"
+  nginx_container:
+    description: "Nginx Docker container name to reload after renewal (optional)"
+    required: false
+    default: ""
+
+outputs:
+  cert_path:
+    description: "Path to the certificate file"
+    value: "${{ steps.cert-paths.outputs.cert_path }}"
+  key_path:
+    description: "Path to the private key file"
+    value: "${{ steps.cert-paths.outputs.key_path }}"
+  cert_dir:
+    description: "Directory containing certificates"
+    value: "${{ steps.cert-paths.outputs.cert_dir }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup ACME-DNS Credentials
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "DOMAIN='${{ inputs.domain }}' ACMEDNS_USERNAME='${{ inputs.acmedns_username }}' ACMEDNS_PASSWORD='${{ inputs.acmedns_password }}' ACMEDNS_FULLDOMAIN='${{ inputs.acmedns_fulldomain }}' ACMEDNS_SUBDOMAIN='${{ inputs.acmedns_subdomain }}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          echo "🔐 Setting up ACME-DNS credentials for $DOMAIN"
+
+          # Create acmedns config directory
+          ACMEDNS_CONFIG_DIR="/etc/letsencrypt/acmedns"
+          sudo mkdir -p "$ACMEDNS_CONFIG_DIR"
+
+          # Create acmedns.json config file
+          ACMEDNS_CONFIG="$ACMEDNS_CONFIG_DIR/acmedns.json"
+
+          # Build JSON config
+          cat > /tmp/acmedns.json <<JSONEOF
+{
+  "$DOMAIN": {
+    "username": "$ACMEDNS_USERNAME",
+    "password": "$ACMEDNS_PASSWORD",
+    "fulldomain": "$ACMEDNS_FULLDOMAIN",
+    "subdomain": "$ACMEDNS_SUBDOMAIN",
+    "allowfrom": []
+  }
+}
+JSONEOF
+
+          sudo mv /tmp/acmedns.json "$ACMEDNS_CONFIG"
+          sudo chmod 600 "$ACMEDNS_CONFIG"
+          echo "✅ ACME-DNS credentials configured at $ACMEDNS_CONFIG"
+        EOF
+
+    - name: Install certbot-dns-acmedns Plugin
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          bash <<'EOF'
+          set -euo pipefail
+
+          echo "📦 Installing certbot and certbot-dns-acmedns plugin..."
+
+          # Install certbot if needed
+          if ! command -v certbot &> /dev/null; then
+            echo "   Installing certbot..."
+            sudo apt-get update -y
+            sudo apt-get install -y certbot python3-pip
+          else
+            echo "   ✅ Certbot already installed: $(certbot --version | head -n1)"
+          fi
+
+          # Install certbot-dns-acmedns plugin
+          if ! python3 -c "import certbot_dns_acmedns" 2>/dev/null; then
+            echo "   Installing certbot-dns-acmedns plugin..."
+            sudo pip3 install certbot-dns-acmedns
+            echo "   ✅ Plugin installed successfully"
+          else
+            echo "   ✅ certbot-dns-acmedns already installed"
+          fi
+        EOF
+
+    - name: Obtain SSL Certificate with ACME-DNS
+      shell: bash
+      env:
+        DOMAIN: "${{ inputs.domain }}"
+        WILDCARD: "${{ inputs.wildcard }}"
+        EMAIL: "${{ inputs.email }}"
+        CERT_DIR: "${{ inputs.certificates_dir }}"
+        FORCE_RENEWAL: "${{ inputs.force_renewal }}"
+        NGINX_CONTAINER: "${{ inputs.nginx_container }}"
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "DOMAIN='$DOMAIN' WILDCARD='$WILDCARD' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' FORCE_RENEWAL='$FORCE_RENEWAL' NGINX_CONTAINER='$NGINX_CONTAINER' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          echo "🔐 Obtaining SSL certificate with ACME-DNS"
+          echo "   Domain: $DOMAIN"
+          if [ "$WILDCARD" = "true" ]; then
+            echo "   Wildcard: Yes (*.$DOMAIN)"
+          fi
+          echo "   Email: $EMAIL"
+          echo "   Certificate Directory: $CERT_DIR"
+
+          # Validate inputs
+          if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
+            echo "❌ Missing required parameters"
+            exit 1
+          fi
+
+          # Create certificate directory
+          if [ ! -d "$CERT_DIR" ]; then
+            echo "📁 Creating certificate directory: $CERT_DIR"
+            sudo mkdir -p "$CERT_DIR"
+          fi
+
+          # Build domain list for certbot
+          DOMAIN_ARGS="-d $DOMAIN"
+          if [ "$WILDCARD" = "true" ]; then
+            DOMAIN_ARGS="$DOMAIN_ARGS -d *.$DOMAIN"
+          fi
+
+          # Check for existing certificate
+          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+          FORCE_FLAG=""
+
+          if [ "$FORCE_RENEWAL" = "true" ]; then
+            echo "🔄 Force renewal requested"
+            FORCE_FLAG="--force-renewal"
+          fi
+
+          # Obtain certificate using ACME-DNS
+          echo "🚀 Requesting certificate from Let's Encrypt (ACME-DNS validation)..."
+          ACMEDNS_CONFIG="/etc/letsencrypt/acmedns/acmedns.json"
+
+          if sudo certbot certonly \
+            --dns-acmedns \
+            --dns-acmedns-credentials "$ACMEDNS_CONFIG" \
+            --dns-acmedns-propagation-seconds 2 \
+            --non-interactive \
+            --agree-tos \
+            --email "$EMAIL" \
+            --key-type ecdsa \
+            $FORCE_FLAG \
+            $DOMAIN_ARGS; then
+            echo "✅ Certificate successfully obtained"
+          else
+            echo "❌ Certificate request failed"
+            exit 1
+          fi
+
+          # Verify certificate exists
+          if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+            echo "❌ Certificate files not found at expected paths"
+            echo "   Expected cert: $CERT_PATH"
+            echo "   Expected key: $KEY_PATH"
+            exit 1
+          fi
+
+          # Reload Nginx if container specified
+          if [ -n "$NGINX_CONTAINER" ]; then
+            echo "🔄 Reloading Nginx container: $NGINX_CONTAINER"
+            if sudo docker exec "$NGINX_CONTAINER" nginx -s reload; then
+              echo "✅ Nginx reloaded successfully"
+            else
+              echo "⚠️  Nginx reload failed (container may not be running)"
+            fi
+          fi
+
+          # Display certificate details
+          echo ""
+          echo "✅ SSL Certificate Successfully Obtained!"
+          echo ""
+          echo "📋 Certificate Details:"
+          echo "   Cert Path: $CERT_PATH"
+          echo "   Key Path: $KEY_PATH"
+
+          # Show expiration date
+          EXPIRY=$(sudo openssl x509 -enddate -noout -in "$CERT_PATH" | cut -d= -f2)
+          echo "   Expires: $EXPIRY"
+
+          # Show all domains in certificate
+          echo "   Domains in Certificate:"
+          sudo openssl x509 -noout -text -in "$CERT_PATH" | grep -A1 "Subject Alternative Name" | tail -1 | sed 's/DNS://g' | tr ',' '\n' | sed 's/^ */     - /' || true
+
+          echo ""
+          echo "🎉 Certificate provisioning complete!"
+          echo "⚡ Total time: ~30 seconds (vs 5-10 minutes with traditional DNS)"
+        EOF
+
+    - name: Extract certificate paths
+      id: cert-paths
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "CERT_DIR='${{ inputs.certificates_dir }}' DOMAIN='${{ inputs.domain }}' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+          CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
+
+          if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+            echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
+            echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
+            echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
+            echo "✅ Paths exported for subsequent steps"
+          else
+            echo "❌ Certificate paths not found"
+            exit 1
+          fi
+        EOF
