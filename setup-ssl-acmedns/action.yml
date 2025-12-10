@@ -209,7 +209,7 @@ runs:
           fi
 
           # Verify certificate exists
-          if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+          if ! sudo test -f "$CERT_PATH" || ! sudo test -f "$KEY_PATH"; then
             echo "❌ Certificate files not found at expected paths"
             echo "   Expected cert: $CERT_PATH"
             echo "   Expected key: $KEY_PATH"
@@ -261,7 +261,7 @@ runs:
           KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
           CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
 
-          if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+          if sudo test -f "$CERT_PATH" && sudo test -f "$KEY_PATH"; then
             echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
             echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
             echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
