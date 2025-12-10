@@ -251,23 +251,14 @@ runs:
       id: cert-paths
       shell: bash
       run: |
-        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
-          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
-          "${{ inputs.user }}@${{ inputs.host }}" \
-          "CERT_DIR='${{ inputs.certificates_dir }}' DOMAIN='${{ inputs.domain }}' bash -s" <<-'EOF'
-          set -euo pipefail
+        CERT_DIR="${{ inputs.certificates_dir }}"
+        DOMAIN="${{ inputs.domain }}"
 
-          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
-          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
-          CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
+        CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+        KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+        CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
 
-          if sudo test -f "$CERT_PATH" && sudo test -f "$KEY_PATH"; then
-            echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
-            echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
-            echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
-            echo "✅ Paths exported for subsequent steps"
-          else
-            echo "❌ Certificate paths not found"
-            exit 1
-          fi
-        EOF
+        echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
+        echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
+        echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
+        echo "✅ Paths exported for subsequent steps"
