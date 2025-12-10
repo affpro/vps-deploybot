@@ -1,0 +1,310 @@
+name: Ensure SSL Certificate (FreeDNS.si)
+description: "Check if SSL certificate exists for domain, create if missing, optionally renew if expiring soon"
+
+inputs:
+  host:
+    description: "VPS hostname or IP"
+    required: true
+  user:
+    description: "SSH username"
+    required: true
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+  domain:
+    description: "Primary domain for the certificate (e.g., taxi-laguna.com)"
+    required: true
+  wildcard:
+    description: "Include wildcard certificate (*.domain.com)"
+    required: false
+    default: "true"
+  freedns_username:
+    description: "FreeDNS.si username (store as GitHub secret)"
+    required: true
+  freedns_password:
+    description: "FreeDNS.si password (store as GitHub secret)"
+    required: true
+  email:
+    description: "Email for Let's Encrypt registration and renewal notices"
+    required: true
+  certificates_dir:
+    description: "Directory to store certificates on VPS (default: /etc/letsencrypt)"
+    required: false
+    default: "/etc/letsencrypt"
+  hook_script_dir:
+    description: "Directory to store FreeDNS hook scripts on VPS"
+    required: false
+    default: "/opt/certbot-freedns"
+  renew_days_before_expiry:
+    description: "Auto-renew if certificate expires within this many days (0 = only create if missing)"
+    required: false
+    default: "30"
+  nginx_container:
+    description: "Nginx Docker container name to reload after renewal (optional)"
+    required: false
+    default: ""
+
+outputs:
+  cert_path:
+    description: "Path to the certificate file"
+    value: "${{ steps.cert-paths.outputs.cert_path }}"
+  key_path:
+    description: "Path to the private key file"
+    value: "${{ steps.cert-paths.outputs.key_path }}"
+  cert_dir:
+    description: "Directory containing certificates"
+    value: "${{ steps.cert-paths.outputs.cert_dir }}"
+  action_taken:
+    description: "Action taken: created, renewed, or skipped"
+    value: "${{ steps.ensure-cert.outputs.action_taken }}"
+  days_until_expiry:
+    description: "Days until certificate expiry (if exists)"
+    value: "${{ steps.ensure-cert.outputs.days_until_expiry }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Upload FreeDNS Hook Script to VPS
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "HOOK_DIR='${{ inputs.hook_script_dir }}' bash -s" <<'EOF'
+          set -euo pipefail
+
+          echo "📁 Setting up FreeDNS hook script directory..."
+          sudo mkdir -p "$HOOK_DIR"
+          echo "✅ Directory ready: $HOOK_DIR"
+        EOF
+
+        # Upload the hook script if not already present
+        if ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "[ -f '${{ inputs.hook_script_dir }}/certbot-freedns_si.sh' ]"; then
+          echo "✅ Hook script already present"
+        else
+          scp -i ~/.ssh/id_rsa -P "${{ inputs.port }}" \
+            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR \
+            "${{ github.action_path }}/certbot-freedns_si.sh" \
+            "${{ inputs.user }}@${{ inputs.host }}:/tmp/certbot-freedns_si.sh"
+
+          ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+            -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+            "${{ inputs.user }}@${{ inputs.host }}" \
+            "HOOK_DIR='${{ inputs.hook_script_dir }}' bash -s" <<'EOF'
+            set -euo pipefail
+            sudo mv /tmp/certbot-freedns_si.sh "$HOOK_DIR/certbot-freedns_si.sh"
+            sudo chmod +x "$HOOK_DIR/certbot-freedns_si.sh"
+            echo "✅ Hook script uploaded and made executable"
+        EOF
+        fi
+
+    - name: Ensure SSL Certificate Exists
+      id: ensure-cert
+      shell: bash
+      env:
+        DOMAIN: "${{ inputs.domain }}"
+        WILDCARD: "${{ inputs.wildcard }}"
+        FREEDNS_USERNAME: "${{ inputs.freedns_username }}"
+        FREEDNS_PASSWORD: "${{ inputs.freedns_password }}"
+        EMAIL: "${{ inputs.email }}"
+        CERT_DIR: "${{ inputs.certificates_dir }}"
+        HOOK_DIR: "${{ inputs.hook_script_dir }}"
+        RENEW_DAYS: "${{ inputs.renew_days_before_expiry }}"
+        NGINX_CONTAINER: "${{ inputs.nginx_container }}"
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "DOMAIN='$DOMAIN' WILDCARD='$WILDCARD' FREEDNS_USERNAME='$FREEDNS_USERNAME' FREEDNS_PASSWORD='$FREEDNS_PASSWORD' EMAIL='$EMAIL' CERT_DIR='$CERT_DIR' HOOK_DIR='$HOOK_DIR' RENEW_DAYS='$RENEW_DAYS' NGINX_CONTAINER='$NGINX_CONTAINER' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          echo "🔐 Ensuring SSL certificate exists for $DOMAIN"
+          if [ "$WILDCARD" = "true" ]; then
+            echo "   Type: Wildcard (*.$DOMAIN)"
+          fi
+          echo "   Email: $EMAIL"
+          echo "   Certificate Directory: $CERT_DIR"
+
+          # Validate inputs
+          if [ -z "$DOMAIN" ] || [ -z "$FREEDNS_USERNAME" ] || [ -z "$FREEDNS_PASSWORD" ] || [ -z "$EMAIL" ]; then
+            echo "❌ Missing required parameters"
+            exit 1
+          fi
+
+          # Create certificate directory
+          if [ ! -d "$CERT_DIR" ]; then
+            echo "📁 Creating certificate directory: $CERT_DIR"
+            sudo mkdir -p "$CERT_DIR"
+          fi
+
+          # Install certbot if needed
+          if ! command -v certbot &> /dev/null; then
+            echo "📦 Installing certbot..."
+            sudo apt-get update -y
+            sudo apt-get install -y certbot libxml2-utils curl
+            echo "✅ Certbot installed"
+          else
+            echo "✅ Certbot already installed: $(certbot --version | head -n1)"
+          fi
+
+          # Ensure xmllint (libxml2-utils) is installed
+          if ! command -v xmllint &> /dev/null; then
+            echo "📦 Installing xmllint..."
+            sudo apt-get install -y libxml2-utils
+          fi
+
+          # Check if certificate exists
+          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+          ACTION="skipped"
+          DAYS_LEFT=0
+
+          if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+            echo "📋 Certificate already exists"
+
+            # Check expiry date
+            EXPIRY_DATE=$(sudo openssl x509 -enddate -noout -in "$CERT_PATH" | cut -d= -f2)
+            EXPIRY_EPOCH=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY_DATE" +%s)
+            CURRENT_EPOCH=$(date +%s)
+            DAYS_LEFT=$(( ($EXPIRY_EPOCH - $CURRENT_EPOCH) / 86400 ))
+
+            echo "   Expires: $EXPIRY_DATE"
+            echo "   Days remaining: $DAYS_LEFT"
+            echo "days_until_expiry=$DAYS_LEFT" >> $GITHUB_OUTPUT
+
+            if [ $DAYS_LEFT -le $RENEW_DAYS ]; then
+              echo "⚠️  Certificate expires in $DAYS_LEFT days (threshold: $RENEW_DAYS days)"
+              echo "🔄 Renewing certificate..."
+              ACTION="renewed"
+            else
+              echo "✅ Certificate is valid for $DAYS_LEFT more days (threshold: $RENEW_DAYS days)"
+              echo "ℹ️  Skipping renewal"
+              echo "action_taken=skipped" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            echo "ℹ️  No certificate found, creating new certificate..."
+            ACTION="created"
+          fi
+
+          # Create temporary FreeDNS credentials file
+          FREEDNS_CREDS="$HOOK_DIR/_auth_credentials.inc"
+          echo "🔑 Creating temporary FreeDNS credentials file"
+          cat <<CREDS | sudo tee "$FREEDNS_CREDS" > /dev/null
+USERNAME="$FREEDNS_USERNAME"
+PASSWORD="$FREEDNS_PASSWORD"
+DOMAIN="$DOMAIN"
+CREDS
+          sudo chmod 600 "$FREEDNS_CREDS"
+          echo "✅ Temporary credentials file created"
+
+          # Build domain list for certbot
+          DOMAIN_ARGS="-d $DOMAIN"
+          if [ "$WILDCARD" = "true" ]; then
+            DOMAIN_ARGS="$DOMAIN_ARGS -d *.$DOMAIN"
+          fi
+
+          # Create or renew certificate with FreeDNS hook
+          echo "🚀 ${ACTION^} certificate from Let's Encrypt..."
+          CERT_SUCCESS=false
+          if sudo certbot certonly \
+            --manual \
+            --preferred-challenges dns \
+            --manual-auth-hook "$HOOK_DIR/certbot-freedns_si.sh --auth" \
+            --manual-cleanup-hook "$HOOK_DIR/certbot-freedns_si.sh --cleanup" \
+            --non-interactive \
+            --agree-tos \
+            --email "$EMAIL" \
+            --manual-public-ip-logging-ok \
+            --key-type ecdsa \
+            $DOMAIN_ARGS; then
+            echo "✅ Certificate successfully $ACTION"
+            CERT_SUCCESS=true
+          else
+            echo "❌ Certificate operation failed"
+          fi
+
+          # Clean up credentials file
+          echo "🧹 Removing temporary credentials file..."
+          sudo rm -f "$FREEDNS_CREDS"
+          echo "✅ Credentials file removed"
+
+          # Exit if certificate operation failed
+          if [ "$CERT_SUCCESS" = false ]; then
+            exit 1
+          fi
+
+          # Verify certificate exists
+          if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
+            echo "❌ Certificate files not found at expected paths"
+            echo "   Expected cert: $CERT_PATH"
+            echo "   Expected key: $KEY_PATH"
+            exit 1
+          fi
+
+          # Reload Nginx if container specified
+          if [ -n "$NGINX_CONTAINER" ]; then
+            echo "🔄 Reloading Nginx container: $NGINX_CONTAINER"
+            if sudo docker exec "$NGINX_CONTAINER" nginx -s reload; then
+              echo "✅ Nginx reloaded successfully"
+            else
+              echo "⚠️  Nginx reload failed (container may not be running)"
+            fi
+          fi
+
+          # Display certificate details
+          echo ""
+          echo "✅ SSL Certificate Ready!"
+          echo ""
+          echo "📋 Certificate Details:"
+          echo "   Cert Path: $CERT_PATH"
+          echo "   Key Path: $KEY_PATH"
+
+          # Show expiration date
+          EXPIRY=$(sudo openssl x509 -enddate -noout -in "$CERT_PATH" | cut -d= -f2)
+          EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY" +%s)
+          CURRENT_EPOCH=$(date +%s)
+          DAYS_LEFT=$(( ($EXPIRY_EPOCH - $CURRENT_EPOCH) / 86400 ))
+          echo "   Expires: $EXPIRY"
+          echo "   Valid for: $DAYS_LEFT days"
+
+          # Show all domains in certificate
+          echo "   Domains in Certificate:"
+          sudo openssl x509 -noout -text -in "$CERT_PATH" | grep -A1 "Subject Alternative Name" | tail -1 | sed 's/DNS://g' | tr ',' '\n' | sed 's/^ */     - /' || true
+
+          echo ""
+          echo "🎉 Certificate $ACTION successfully!"
+
+          # Output action taken
+          echo "action_taken=$ACTION" >> $GITHUB_OUTPUT
+          echo "days_until_expiry=$DAYS_LEFT" >> $GITHUB_OUTPUT
+        EOF
+
+    - name: Extract certificate paths
+      id: cert-paths
+      shell: bash
+      run: |
+        ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
+          -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
+          "${{ inputs.user }}@${{ inputs.host }}" \
+          "CERT_DIR='${{ inputs.certificates_dir }}' DOMAIN='${{ inputs.domain }}' bash -s" <<-'EOF'
+          set -euo pipefail
+
+          CERT_PATH="$CERT_DIR/live/$DOMAIN/fullchain.pem"
+          KEY_PATH="$CERT_DIR/live/$DOMAIN/privkey.pem"
+          CERT_LIVE_DIR="$CERT_DIR/live/$DOMAIN"
+
+          if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
+            echo "cert_path=$CERT_PATH" >> $GITHUB_OUTPUT
+            echo "key_path=$KEY_PATH" >> $GITHUB_OUTPUT
+            echo "cert_dir=$CERT_LIVE_DIR" >> $GITHUB_OUTPUT
+            echo "✅ Paths exported for subsequent steps"
+          else
+            echo "❌ Certificate paths not found"
+            exit 1
+          fi
+        EOF
