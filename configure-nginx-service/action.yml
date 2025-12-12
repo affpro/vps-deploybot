@@ -57,6 +57,10 @@ inputs:
     description: "Path to SSL private key file"
     required: false
     default: ""
+  redirect_non_www_domain:
+    description: "Non-www domain to redirect from (e.g., example.com will redirect to www.example.com in server_name)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -76,11 +80,12 @@ runs:
         ENABLE_SSL: "${{ inputs.enable_ssl }}"
         SSL_CERT_PATH: "${{ inputs.ssl_cert_path }}"
         SSL_KEY_PATH: "${{ inputs.ssl_key_path }}"
+        REDIRECT_NON_WWW_DOMAIN: "${{ inputs.redirect_non_www_domain }}"
       run: |
         ssh -i ~/.ssh/id_rsa -p "${{ inputs.port }}" \
           -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o LogLevel=ERROR -T \
           "${{ inputs.user }}@${{ inputs.host }}" \
-          "SERVICE_NAME='$SERVICE_NAME' CONTAINER_NAME='$CONTAINER_NAME' CONTAINER_PORT='$CONTAINER_PORT' ROUTING_TYPE='$ROUTING_TYPE' SERVER_NAME='$SERVER_NAME' PATH_PREFIX='$PATH_PREFIX' DOMAIN='$DOMAIN' NGINX_CONTAINER='$NGINX_CONTAINER' REMOVE_SERVICE='$REMOVE_SERVICE' ENABLE_SSL='$ENABLE_SSL' SSL_CERT_PATH='$SSL_CERT_PATH' SSL_KEY_PATH='$SSL_KEY_PATH' bash -s" <<-'EOF'
+          "SERVICE_NAME='$SERVICE_NAME' CONTAINER_NAME='$CONTAINER_NAME' CONTAINER_PORT='$CONTAINER_PORT' ROUTING_TYPE='$ROUTING_TYPE' SERVER_NAME='$SERVER_NAME' PATH_PREFIX='$PATH_PREFIX' DOMAIN='$DOMAIN' NGINX_CONTAINER='$NGINX_CONTAINER' REMOVE_SERVICE='$REMOVE_SERVICE' ENABLE_SSL='$ENABLE_SSL' SSL_CERT_PATH='$SSL_CERT_PATH' SSL_KEY_PATH='$SSL_KEY_PATH' REDIRECT_NON_WWW_DOMAIN='$REDIRECT_NON_WWW_DOMAIN' bash -s" <<-'EOF'
           set -euo pipefail
 
           NGINX_SITES_DIR="/opt/nginx/sites-enabled"
@@ -359,6 +364,63 @@ runs:
             fi
           fi
           echo "   Config file: $CONFIG_FILE"
+
+          # Configure non-www to www redirect if specified
+          if [ -n "$REDIRECT_NON_WWW_DOMAIN" ]; then
+            echo ""
+            echo "🔀 Configuring redirect from $REDIRECT_NON_WWW_DOMAIN to $SERVER_NAME..."
+
+            REDIRECT_CONFIG_FILE="$NGINX_SITES_DIR/redirect-$REDIRECT_NON_WWW_DOMAIN.conf"
+
+            # Create redirect configuration
+            echo "# Redirect from $REDIRECT_NON_WWW_DOMAIN to $SERVER_NAME" | sudo tee "$REDIRECT_CONFIG_FILE" > /dev/null
+
+            # HTTP redirect
+            echo "server {" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+            echo "    listen 80;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+            echo "    listen [::]:80;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+            echo "    server_name $REDIRECT_NON_WWW_DOMAIN;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+            echo "    return 301 https://$SERVER_NAME\$request_uri;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+            echo "}" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+
+            # HTTPS redirect (only if SSL is enabled)
+            if [ "$ENABLE_SSL" = "true" ] && [ -n "$SSL_CERT_PATH" ] && [ -n "$SSL_KEY_PATH" ]; then
+              echo "" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "server {" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    listen 443 ssl;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    http2 on;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    listen [::]:443 ssl;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    server_name $REDIRECT_NON_WWW_DOMAIN;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    ssl_certificate $SSL_CERT_PATH;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    ssl_certificate_key $SSL_KEY_PATH;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "    return 301 https://$SERVER_NAME\$request_uri;" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+              echo "}" | sudo tee -a "$REDIRECT_CONFIG_FILE" > /dev/null
+            fi
+
+            echo "✅ Redirect configuration created: $REDIRECT_CONFIG_FILE"
+
+            # Test nginx configuration with redirect
+            echo "🔍 Testing nginx configuration with redirect..."
+            if sudo docker exec "$NGINX_CONTAINER" nginx -t; then
+              echo "✅ Nginx configuration test passed with redirect"
+            else
+              echo "❌ Nginx configuration test failed with redirect. Removing redirect config..."
+              sudo rm "$REDIRECT_CONFIG_FILE"
+              exit 1
+            fi
+
+            # Reload nginx with redirect
+            echo "🔄 Reloading nginx with redirect configuration..."
+            if sudo docker exec "$NGINX_CONTAINER" nginx -s reload; then
+              echo "✅ Nginx reloaded successfully with redirect"
+            else
+              echo "❌ Failed to reload nginx with redirect. Rolling back..."
+              sudo rm "$REDIRECT_CONFIG_FILE"
+              exit 1
+            fi
+
+            echo "🎉 Redirect from $REDIRECT_NON_WWW_DOMAIN to $SERVER_NAME configured successfully!"
+          fi
         EOF
 
     - name: Verify Service Configuration
